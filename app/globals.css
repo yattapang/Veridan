@@ -1,8 +1,25 @@
 @import "tailwindcss";
 
+/*
+ * Veridan brand palette (placeholder pending founder-supplied brand assets —
+ * PRD §13 item 1 / Build Plan Task 7 note). Architectural, restrained:
+ * near-black ink, warm paper white, warm neutral gray, one metallic (brass)
+ * accent. Swap these tokens when real brand colors/logo arrive — every
+ * component below reads from these variables, not hardcoded hex values.
+ */
 :root {
   --background: #ffffff;
   --foreground: #171717;
+
+  --color-ink: #0c0c0d;
+  --color-ink-soft: #17171a;
+  --color-paper: #faf9f6;
+  --color-warm-gray: #6f6a60;
+  --color-warm-gray-light: #d9d5cc;
+  --color-warm-gray-pale: #f3f1ec;
+  --color-accent: #a9895c;
+  --color-accent-soft: #c9ac7e;
+  --color-line: #26241f;
 }
 
 @theme inline {
@@ -10,17 +27,20 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-veridan-ink: var(--color-ink);
+  --color-veridan-ink-soft: var(--color-ink-soft);
+  --color-veridan-paper: var(--color-paper);
+  --color-veridan-warm-gray: var(--color-warm-gray);
+  --color-veridan-warm-gray-light: var(--color-warm-gray-light);
+  --color-veridan-warm-gray-pale: var(--color-warm-gray-pale);
+  --color-veridan-accent: var(--color-accent);
+  --color-veridan-accent-soft: var(--color-accent-soft);
+  --color-veridan-line: var(--color-line);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
 }
