@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { syncUserRecord } from "@/lib/auth";
 
 function LoginForm() {
   const router = useRouter();
@@ -26,6 +27,12 @@ function LoginForm() {
       if (signInError) {
         setError(signInError.message);
         return;
+      }
+      // Sync the public.users row (Task 5: "users table sync on first
+      // login"). Non-fatal if it fails — don't block sign-in over it.
+      const { error: syncError } = await syncUserRecord();
+      if (syncError) {
+        console.error("User record sync failed:", syncError);
       }
       router.push(searchParams.get("redirect") ?? "/admin");
       router.refresh();
