@@ -140,3 +140,106 @@ export interface ContactRow {
   created_at: string;
   updated_at: string;
 }
+
+/** §1.12 Enquiries (portal intake) */
+export type EnquiryPathway = "new_construction" | "retrofit";
+export const ENQUIRY_PATHWAYS: EnquiryPathway[] = ["new_construction", "retrofit"];
+
+export type EnquiryStatus = "new" | "reviewing" | "converted" | "discarded";
+export const ENQUIRY_STATUSES: EnquiryStatus[] = ["new", "reviewing", "converted", "discarded"];
+
+export type RetrofitPathway = "owner_direct" | "contractor_instructed";
+
+export interface EnquiryRow {
+  id: string;
+  pathway: EnquiryPathway;
+  company_name: string | null;
+  matched_company_id: string | null;
+  contact_name: string;
+  contact_email: string;
+  contact_phone: string | null;
+  project_details: string | null;
+  delivery_timeframe: string | null;
+  building_type: string | null;
+  failing_hardware_description: string | null;
+  urgency_flag: boolean;
+  retrofit_pathway: RetrofitPathway | null;
+  uploaded_file_paths: string[] | null;
+  line_items_structured: unknown | null;
+  honeypot_tripped: boolean;
+  status: EnquiryStatus;
+  project_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** §1.5 Projects */
+export type ProjectType = "new_construction" | "retrofit";
+export const PROJECT_TYPES: ProjectType[] = ["new_construction", "retrofit"];
+
+export type ProjectStatus = "active" | "closed" | "archived";
+export const PROJECT_STATUSES: ProjectStatus[] = ["active", "closed", "archived"];
+
+export interface ProjectRow {
+  id: string;
+  company_id: string;
+  primary_contact_id: string | null;
+  architect_company_id: string | null;
+  name: string;
+  site_address: string | null;
+  project_type: ProjectType;
+  status: ProjectStatus;
+  enquiry_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Project row joined with related company names, for list/detail display. */
+export interface ProjectWithCompany extends ProjectRow {
+  companies: { id: string; name: string } | null;
+}
+
+/** §1.3 Hardware Sets */
+export interface HardwareSetRow {
+  id: string;
+  project_id: string | null;
+  code: string;
+  name: string | null;
+  cloned_from_set_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * §1.4 Hardware Set Line Items. `notes` is an additive column beyond the
+ * build plan's §1.4 table — see
+ * supabase/migrations/20260715000001_hardware_set_line_item_notes.sql.
+ */
+export interface HardwareSetLineItemRow {
+  id: string;
+  hardware_set_id: string;
+  product_id: string;
+  supplier_id: string;
+  qty: number;
+  unit_cost_override: number | null;
+  cost_currency_override: CurrencyCode | null;
+  sort_order: number | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Line item joined with its product + supplier for display/costing. */
+export interface HardwareSetLineItemWithDetails extends HardwareSetLineItemRow {
+  products: {
+    id: string;
+    description: string;
+    manufacturer: string | null;
+    product_ref: string | null;
+    catalogue_ref: string | null;
+    unit: string;
+    unit_cost: number;
+    cost_currency: CurrencyCode;
+  } | null;
+  suppliers: { id: string; name: string; default_currency: CurrencyCode } | null;
+}
