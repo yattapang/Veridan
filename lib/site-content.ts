@@ -36,6 +36,16 @@ export const contactInfo = {
   location: "Kingston, Jamaica",
 } as const;
 
+// TODO(founder input needed, Task 8): placeholder recipient list for the
+// "new enquiry" notification email (Resend). PRD §5.4 says "notify Ken &
+// Kaylia" but this repo has no confirmed individual founder inboxes — using
+// the shared info@ address for both until real addresses are provided, at
+// which point this should become e.g. ["ken@veridanlimited.com",
+// "kaylia@veridanlimited.com"]. A single shared inbox means both founders
+// see every enquiry today, which satisfies the PRD requirement, just not by
+// the exact mechanism (two named addresses) it describes.
+export const enquiryNotificationRecipients = [contactInfo.email] as const;
+
 export const navLinks = [
   { href: "/", label: "Home" },
   { href: "/new-construction", label: "New Construction" },
