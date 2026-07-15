@@ -210,6 +210,26 @@ export interface HardwareSetRow {
   updated_at: string;
 }
 
+/** §1.6 Doors (Door Register) */
+export interface DoorRow {
+  id: string;
+  project_id: string;
+  floor: string | null;
+  door_number: string;
+  /** Derived-but-stored (§7.1 item 5) — see lib/doors.ts:deriveDoorType. */
+  door_type: string | null;
+  location_description: string | null;
+  hardware_set_id: string | null;
+  sort_order: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Door row joined with its assigned hardware set, for the register grid. */
+export interface DoorWithHardwareSet extends DoorRow {
+  hardware_sets: { id: string; code: string; name: string | null } | null;
+}
+
 /**
  * §1.4 Hardware Set Line Items. `notes` is an additive column beyond the
  * build plan's §1.4 table — see

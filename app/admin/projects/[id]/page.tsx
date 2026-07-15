@@ -88,7 +88,7 @@ export default async function ProjectDetailPage({
     notFound();
   }
 
-  const [companiesResult, setsResult, cloneOptionsResult, fxParamResult] = await Promise.all([
+  const [companiesResult, setsResult, cloneOptionsResult, fxParamResult, doorCountResult] = await Promise.all([
     supabase.from("companies").select("*").order("name"),
     supabase.from("hardware_sets").select("*").eq("project_id", id).order("code"),
     supabase
@@ -98,7 +98,10 @@ export default async function ProjectDetailPage({
       .not("project_id", "is", null)
       .order("code"),
     supabase.from("business_parameters").select("*").eq("key", "supplier_fx_rates").maybeSingle(),
+    supabase.from("doors").select("id", { count: "exact", head: true }).eq("project_id", id),
   ]);
+
+  const doorCount = doorCountResult.count ?? 0;
 
   const companies = (companiesResult.data as CompanyRow[]) ?? [];
   const sets = (setsResult.data as HardwareSetRow[]) ?? [];
@@ -185,6 +188,26 @@ export default async function ProjectDetailPage({
           Project details
         </h2>
         <ProjectHeaderForm project={project} companies={companies} />
+      </section>
+
+      <section className="mt-8 rounded-md border border-veridan-warm-gray-light bg-white px-5 py-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">
+              Door Register
+            </h2>
+            <p className="mt-1 text-xs text-veridan-warm-gray">
+              {doorCount} door{doorCount === 1 ? "" : "s"} entered · floor, door number, auto-derived type,
+              location, and assigned hardware set.
+            </p>
+          </div>
+          <Link
+            href={`/admin/projects/${project.id}/doors`}
+            className="shrink-0 rounded-md bg-veridan-ink px-4 py-2 text-xs font-medium uppercase tracking-wide text-veridan-paper transition-opacity duration-150 hover:opacity-90"
+          >
+            Open Door Register →
+          </Link>
+        </div>
       </section>
 
       <section className="mt-10">
