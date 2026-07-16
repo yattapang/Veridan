@@ -27,7 +27,13 @@
 -- timestamps/totals already sitting on `quotes`.
 -- ============================================================================
 
-create or replace view public.pipeline_view as
+-- NOTE: CREATE OR REPLACE cannot reorder/rename view columns (fails with
+-- "cannot change name of view column"), so the view is dropped and
+-- recreated. Views run with owner privileges over RLS'd tables; no grants
+-- are lost that the recreate below doesn't restore.
+drop view if exists public.pipeline_view;
+
+create view public.pipeline_view as
 select
   e.id as enquiry_id,
   p.id as project_id,
@@ -59,3 +65,6 @@ select
 from public.enquiries e
 left join public.projects p on p.enquiry_id = e.id
 left join public.quotes q on q.project_id = p.id;
+
+-- Founder tooling only: anonymous role has no business reading the pipeline.
+revoke all on public.pipeline_view from anon;
