@@ -99,14 +99,14 @@ export async function submitEnquiry(
       };
     }
   } catch (err) {
-    console.error("[enquiries] Rate limiter failed; failing open:", err);
+    console.error("[veridan:enquiries-submit] Rate limiter failed; failing open:", err);
   }
 
   let supabase;
   try {
     supabase = await createClient();
   } catch (err) {
-    console.error("[enquiries] Supabase not configured:", err);
+    console.error("[veridan:enquiries-submit] Supabase not configured:", err);
     return {
       ok: false,
       error:
@@ -144,7 +144,7 @@ export async function submitEnquiry(
       });
 
     if (uploadError) {
-      console.error("[enquiries] File upload failed:", uploadError);
+      console.error("[veridan:enquiries-submit] File upload failed:", uploadError);
       return {
         ok: false,
         error:
@@ -168,7 +168,7 @@ export async function submitEnquiry(
     // Expected in this repo until the Supabase migrations are applied to
     // the live project (per Task 8 brief) — surface a generic message to
     // the visitor and keep the details server-side only.
-    console.error("[enquiries] Insert failed:", insertError);
+    console.error("[veridan:enquiries-submit] Insert failed:", insertError);
     return {
       ok: false,
       error:
@@ -188,7 +188,7 @@ export async function submitEnquiry(
     if (!emailResult.ok) {
       // Per Task 8 brief: email failure must NOT fail the submission.
       console.error(
-        "[enquiries] Notification email failed (submission still succeeded):",
+        "[veridan:enquiries-submit] Notification email failed (submission still succeeded):",
         emailResult.error
       );
     }

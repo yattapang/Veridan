@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth";
 import { COMPANY_TYPES, type CompanyStatus, type CompanyType } from "@/lib/supabase/types";
 
 export type CompanyFormResult =
@@ -56,6 +57,9 @@ export async function createCompany(
     return { ok: false, error: err instanceof Error ? err.message : "Supabase is not configured." };
   }
 
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "You must be signed in to create a company." };
+
   const parsed = parseCompanyFields(formData);
   if (!parsed.ok) return parsed;
 
@@ -79,6 +83,9 @@ export async function updateCompany(
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Supabase is not configured." };
   }
+
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "You must be signed in to update a company." };
 
   const parsed = parseCompanyFields(formData);
   if (!parsed.ok) return parsed;
@@ -142,6 +149,9 @@ export async function createContact(
     return { ok: false, error: err instanceof Error ? err.message : "Supabase is not configured." };
   }
 
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "You must be signed in to add a contact." };
+
   const parsed = parseContactFields(formData);
   if (!parsed.ok) return parsed;
 
@@ -168,6 +178,9 @@ export async function updateContact(
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Supabase is not configured." };
   }
+
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "You must be signed in to update a contact." };
 
   const parsed = parseContactFields(formData);
   if (!parsed.ok) return parsed;
@@ -197,6 +210,9 @@ export async function deleteContact(
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Supabase is not configured." };
   }
+
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "You must be signed in to remove a contact." };
 
   const { error } = await supabase.from("contacts").delete().eq("id", contactId);
   if (error) {

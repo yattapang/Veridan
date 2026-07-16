@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth";
 import type {
   BusinessParameterRow,
   ParameterValueType,
@@ -143,12 +144,8 @@ export async function updateParameter(
     };
   }
 
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
-
-  if (userError || !user) {
+  const user = await getCurrentUser();
+  if (!user) {
     return { ok: false, error: "You must be signed in to change parameters." };
   }
 

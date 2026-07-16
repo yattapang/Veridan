@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth";
 import { toUsd } from "@/lib/landed-cost/engine";
 import { fxSnapshotToEngine } from "@/lib/quotes/snapshot";
 import { ensureOriginForSupplier, recomputeQuote, regroupLineItemOrigins } from "@/lib/quotes/persist";
@@ -66,6 +67,9 @@ export async function addLibraryQuoteLine(
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Supabase is not configured." };
   }
+
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "You must be signed in to add a quote line." };
 
   const loaded = await loadDraftLineItemQuote(supabase, quoteId);
   if ("error" in loaded) return { ok: false, error: loaded.error };
@@ -161,6 +165,9 @@ export async function addAdHocQuoteLine(
     return { ok: false, error: err instanceof Error ? err.message : "Supabase is not configured." };
   }
 
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "You must be signed in to add a quote line." };
+
   const loaded = await loadDraftLineItemQuote(supabase, quoteId);
   if ("error" in loaded) return { ok: false, error: loaded.error };
   const { quote } = loaded;
@@ -249,6 +256,9 @@ export async function updateQuoteLine(
     return { ok: false, error: err instanceof Error ? err.message : "Supabase is not configured." };
   }
 
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "You must be signed in to update a quote line." };
+
   const loaded = await loadDraftLineItemQuote(supabase, quoteId);
   if ("error" in loaded) return { ok: false, error: loaded.error };
   const { quote } = loaded;
@@ -322,6 +332,9 @@ export async function deleteQuoteLine(quoteId: string, lineId: string): Promise<
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Supabase is not configured." };
   }
+
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "You must be signed in to remove a quote line." };
 
   const loaded = await loadDraftLineItemQuote(supabase, quoteId);
   if ("error" in loaded) return { ok: false, error: loaded.error };

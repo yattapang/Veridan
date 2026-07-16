@@ -37,7 +37,7 @@ export async function sendEnquiryNotification(
   const resend = getResendClient();
   if (!resend) {
     console.error(
-      "[email] RESEND_API_KEY is not set — skipping enquiry notification email."
+      "[veridan:email] RESEND_API_KEY is not set — skipping enquiry notification email."
     );
     return { ok: false, error: "RESEND_API_KEY not configured" };
   }
@@ -72,14 +72,14 @@ export async function sendEnquiryNotification(
     });
 
     if (error) {
-      console.error("[email] Resend returned an error:", error);
+      console.error("[veridan:email] Resend returned an error:", error);
       return { ok: false, error: error.message };
     }
 
     return { ok: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error sending email.";
-    console.error("[email] Failed to send enquiry notification:", err);
+    console.error("[veridan:email] Failed to send enquiry notification:", err);
     return { ok: false, error: message };
   }
 }
@@ -140,14 +140,14 @@ export async function sendQuoteEmail(
     });
 
     if (error) {
-      console.error("[email] Resend returned an error sending a quote:", error);
+      console.error("[veridan:email] Resend returned an error sending a quote:", error);
       return { ok: false, error: error.message };
     }
 
     return { ok: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error sending email.";
-    console.error("[email] Failed to send quote email:", err);
+    console.error("[veridan:email] Failed to send quote email:", err);
     return { ok: false, error: message };
   }
 }

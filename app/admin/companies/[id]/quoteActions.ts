@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth";
 import { createLineItemQuote, type ProjectActionResult } from "@/app/admin/projects/[id]/actions";
 
 export const initialCompanyQuoteActionResult: ProjectActionResult = { ok: true };
@@ -28,6 +29,9 @@ export async function createRetrofitQuoteForCompany(
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Supabase is not configured." };
   }
+
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "You must be signed in to create a quote." };
 
   const { data: company, error: companyError } = await supabase
     .from("companies")

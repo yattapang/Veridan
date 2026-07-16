@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth";
 import { COMPANY_TYPES, type CompanyType } from "@/lib/supabase/types";
 
 export type ConvertResult =
@@ -46,6 +47,9 @@ export async function convertEnquiryToProject(
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Supabase is not configured." };
   }
+
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "You must be signed in to convert an enquiry." };
 
   const { data: enquiry, error: enquiryError } = await supabase
     .from("enquiries")
@@ -123,7 +127,7 @@ export async function convertEnquiryToProject(
       .single();
 
     if (contactError) {
-      console.error("[enquiries/convert] Contact creation failed (non-fatal):", contactError);
+      console.error("[veridan:enquiries-convert] Contact creation failed (non-fatal):", contactError);
     } else {
       primaryContactId = newContact.id;
     }

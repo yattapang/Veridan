@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth";
 import { PROJECT_TYPES, type ProjectType } from "@/lib/supabase/types";
 
 export type ProjectFormResult =
@@ -32,6 +33,9 @@ export async function createProject(
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Supabase is not configured." };
   }
+
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "You must be signed in to create a project." };
 
   const name = String(formData.get("name") ?? "").trim();
   if (!name) {

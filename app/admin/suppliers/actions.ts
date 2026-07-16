@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth";
 import { CURRENCY_CODES, type CurrencyCode } from "@/lib/supabase/types";
 
 export type SupplierFormResult =
@@ -60,6 +61,9 @@ export async function createSupplier(
     return { ok: false, error: err instanceof Error ? err.message : "Supabase is not configured." };
   }
 
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "You must be signed in to create a supplier." };
+
   const parsed = parseSupplierFields(formData);
   if (!parsed.ok) return parsed;
 
@@ -83,6 +87,9 @@ export async function updateSupplier(
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Supabase is not configured." };
   }
+
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "You must be signed in to update a supplier." };
 
   const parsed = parseSupplierFields(formData);
   if (!parsed.ok) return parsed;
@@ -109,6 +116,9 @@ export async function setSupplierActive(id: string, active: boolean): Promise<Su
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Supabase is not configured." };
   }
+
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "You must be signed in to update a supplier." };
 
   const { error } = await supabase.from("suppliers").update({ active }).eq("id", id);
   if (error) {

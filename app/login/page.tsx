@@ -32,7 +32,7 @@ function LoginForm() {
       // login"). Non-fatal if it fails — don't block sign-in over it.
       const { error: syncError } = await syncUserRecord();
       if (syncError) {
-        console.error("User record sync failed:", syncError);
+        console.error("[veridan:login] User record sync failed:", syncError);
       }
       router.push(searchParams.get("redirect") ?? "/admin");
       router.refresh();

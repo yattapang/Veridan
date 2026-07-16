@@ -49,6 +49,9 @@ export async function updateProject(
     return { ok: false, error: err instanceof Error ? err.message : "Supabase is not configured." };
   }
 
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "You must be signed in to update a project." };
+
   const name = String(formData.get("name") ?? "").trim();
   if (!name) {
     return { ok: false, error: "Project name is required." };
@@ -107,6 +110,9 @@ export async function createHardwareSet(
     return { ok: false, error: err instanceof Error ? err.message : "Supabase is not configured." };
   }
 
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "You must be signed in to create a hardware set." };
+
   let code = String(formData.get("code") ?? "").trim().toUpperCase();
   const name = String(formData.get("name") ?? "").trim();
 
@@ -152,6 +158,9 @@ export async function cloneHardwareSet(
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Supabase is not configured." };
   }
+
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "You must be signed in to clone a hardware set." };
 
   const sourceSetId = String(formData.get("source_set_id") ?? "").trim();
   if (!sourceSetId) {

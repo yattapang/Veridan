@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth";
 import { deriveDoorType } from "@/lib/doors";
 
 export type DoorActionResult =
@@ -56,6 +57,9 @@ export async function createDoor(
     return { ok: false, error: err instanceof Error ? err.message : "Supabase is not configured." };
   }
 
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "You must be signed in to add a door." };
+
   const parsed = parseDoorFields(formData);
   if (!parsed.ok) return parsed;
 
@@ -92,6 +96,9 @@ export async function updateDoor(
     return { ok: false, error: err instanceof Error ? err.message : "Supabase is not configured." };
   }
 
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "You must be signed in to update a door." };
+
   const parsed = parseDoorFields(formData);
   if (!parsed.ok) return parsed;
 
@@ -119,6 +126,9 @@ export async function duplicateDoor(projectId: string, doorId: string): Promise<
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Supabase is not configured." };
   }
+
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "You must be signed in to duplicate a door." };
 
   const { data: source, error: sourceError } = await supabase
     .from("doors")
@@ -167,6 +177,9 @@ export async function deleteDoor(projectId: string, doorId: string): Promise<Doo
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Supabase is not configured." };
   }
+
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "You must be signed in to remove a door." };
 
   const { error } = await supabase.from("doors").delete().eq("id", doorId);
   if (error) {

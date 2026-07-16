@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth";
 import { CURRENCY_CODES, type CurrencyCode } from "@/lib/supabase/types";
 
 export type LineItemActionResult =
@@ -80,6 +81,9 @@ export async function addLineItem(
     return { ok: false, error: err instanceof Error ? err.message : "Supabase is not configured." };
   }
 
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "You must be signed in to add a line item." };
+
   const productId = String(formData.get("product_id") ?? "").trim();
   if (!productId) {
     return { ok: false, error: "Choose a product to add." };
@@ -123,6 +127,9 @@ export async function updateLineItem(
     return { ok: false, error: err instanceof Error ? err.message : "Supabase is not configured." };
   }
 
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "You must be signed in to update a line item." };
+
   const parsed = parseLineFields(formData);
   if (!parsed.ok) return parsed;
 
@@ -153,6 +160,9 @@ export async function deleteLineItem(
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Supabase is not configured." };
   }
+
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "You must be signed in to remove a line item." };
 
   const { error } = await supabase.from("hardware_set_line_items").delete().eq("id", lineId);
   if (error) {

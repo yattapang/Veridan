@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth";
 import { ENQUIRY_STATUSES, type EnquiryStatus } from "@/lib/supabase/types";
 
 export type EnquiryActionResult =
@@ -41,6 +42,9 @@ export async function updateEnquiryStatus(
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Supabase is not configured." };
   }
+
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "You must be signed in to update an enquiry." };
 
   const { error } = await supabase.from("enquiries").update({ status }).eq("id", id);
   if (error) {

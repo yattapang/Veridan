@@ -93,6 +93,9 @@ export async function updateQuoteOrigin(
     return { ok: false, error: err instanceof Error ? err.message : "Supabase is not configured." };
   }
 
+  const originUser = await getCurrentUser();
+  if (!originUser) return { ok: false, error: "You must be signed in to edit a shipment origin." };
+
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
     .select("id, status")
@@ -274,6 +277,9 @@ export async function refreshFxSnapshot(quoteId: string): Promise<FxActionResult
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Supabase is not configured." };
   }
+
+  const fxUser = await getCurrentUser();
+  if (!fxUser) return { ok: false, error: "You must be signed in to refresh the FX snapshot." };
 
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
