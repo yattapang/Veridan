@@ -5,6 +5,8 @@
  * in the build plan). Extend as later tasks add more admin surfaces.
  */
 
+import type { PipelineStage } from "@/lib/pipeline";
+
 export interface UserRow {
   id: string;
   email: string;
@@ -446,6 +448,39 @@ export interface OverrideLogRow {
 /** Override log joined with the user who created it, for display. */
 export interface OverrideLogWithUser extends OverrideLogRow {
   users: { id: string; email: string; display_name: string | null } | null;
+}
+
+/** Override log joined with the user AND the quote ref, for /admin/overrides (Task 22). */
+export interface OverrideLogWithDetails extends OverrideLogWithUser {
+  quotes: { id: string; quote_ref: string } | null;
+}
+
+// ---------------------------------------------------------------------------
+// §1.13 Pipeline view (Task 20) — read-only, mirrors `pipeline_view`
+// (supabase/migrations/20260713000001_schema.sql, amended by
+// 20260717000001_pipeline_view_kpi_columns.sql). `stage` is computed in SQL
+// but its logic is duplicated as a pure function in lib/pipeline.ts
+// (deriveStage) so the mapping rule itself is unit-testable.
+// ---------------------------------------------------------------------------
+export interface PipelineViewRow {
+  enquiry_id: string;
+  project_id: string | null;
+  quote_id: string | null;
+  company_name: string | null;
+  contact_name: string | null;
+  pathway: EnquiryPathway;
+  enquiry_status: EnquiryStatus;
+  enquiry_created_at: string;
+  quote_ref: string | null;
+  quote_status: QuoteStatus | null;
+  sent_at: string | null;
+  accepted_at: string | null;
+  declined_at: string | null;
+  total_client_jmd: number | null;
+  total_client_usd: number | null;
+  total_landed_usd: number | null;
+  project_status: ProjectStatus | null;
+  stage: PipelineStage;
 }
 
 /**
