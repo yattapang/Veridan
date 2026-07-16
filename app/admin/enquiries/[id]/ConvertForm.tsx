@@ -35,7 +35,12 @@ export function ConvertForm({
     convertEnquiryToProject.bind(null, enquiry.id),
     initialConvertResult
   );
-  const [mode, setMode] = useState<"existing" | "new">("existing");
+  // Default to "create new" when there are no companies to pick from —
+  // otherwise the submit button starts disabled with nothing selectable,
+  // which reads as "the button doesn't work" (real founder-reported trap).
+  const [mode, setMode] = useState<"existing" | "new">(
+    companies.length > 0 ? "existing" : "new"
+  );
   const [query, setQuery] = useState(enquiry.company_name ?? "");
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
 
@@ -104,7 +109,15 @@ export function ConvertForm({
           />
           {filtered.length === 0 ? (
             <p className="mt-2 text-xs text-veridan-warm-gray">
-              No companies match. Switch to “create new company” instead.
+              No companies match.{" "}
+              <button
+                type="button"
+                onClick={() => setMode("new")}
+                className="font-medium text-veridan-ink underline underline-offset-2"
+              >
+                Create a new company instead
+              </button>
+              .
             </p>
           ) : (
             <ul className="mt-2 max-h-48 overflow-y-auto rounded-md border border-veridan-warm-gray-light">
@@ -214,11 +227,16 @@ export function ConvertForm({
         >
           {pending ? "Converting…" : "Convert to project"}
         </button>
-        {state.ok === false && (
+        {state.ok === false ? (
           <p role="alert" className="max-w-md text-xs text-red-600">
             {state.error}
           </p>
-        )}
+        ) : !canSubmit && !pending ? (
+          <p className="max-w-md text-xs text-veridan-warm-gray">
+            Select a company from the list above (or create a new one) to
+            enable this button.
+          </p>
+        ) : null}
       </div>
     </form>
   );
