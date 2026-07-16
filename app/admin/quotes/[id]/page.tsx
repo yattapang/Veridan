@@ -230,6 +230,14 @@ export default async function QuoteBuilderPage({
         {quote.revision_number > 1 && (
           <span className="text-xs text-veridan-warm-gray">revision {quote.revision_number}</span>
         )}
+        <a
+          href={`/api/quotes/${quote.id}/pdf`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="ml-auto rounded-md border border-veridan-warm-gray-light bg-white px-4 py-2 text-xs font-medium uppercase tracking-wide text-veridan-ink transition-opacity duration-150 hover:opacity-80"
+        >
+          Download PDF
+        </a>
       </div>
       <p className="mt-2 text-sm text-veridan-warm-gray">
         {quote.projects ? (
