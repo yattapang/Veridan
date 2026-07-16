@@ -24,7 +24,7 @@ export default function QuoteRequestPage() {
         <Container className="grid gap-8 sm:grid-cols-2">
           <article className="flex flex-col justify-between border border-veridan-warm-gray-light p-8">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-widest text-veridan-accent">
+              <p className="text-xs font-semibold uppercase tracking-widest text-veridan-accent-text">
                 Architects &amp; Contractors
               </p>
               <h2 className="mt-3 text-xl font-semibold text-veridan-ink">
@@ -48,7 +48,7 @@ export default function QuoteRequestPage() {
 
           <article className="flex flex-col justify-between border border-veridan-warm-gray-light p-8">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-widest text-veridan-accent">
+              <p className="text-xs font-semibold uppercase tracking-widest text-veridan-accent-text">
                 Owners, FMs &amp; Contractors
               </p>
               <h2 className="mt-3 text-xl font-semibold text-veridan-ink">

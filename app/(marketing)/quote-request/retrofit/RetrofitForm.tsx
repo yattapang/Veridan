@@ -123,37 +123,37 @@ export function RetrofitForm() {
             className={fieldInputClass}
           />
         </div>
-        <label className="flex items-center gap-2 text-sm text-veridan-ink">
+        <label className="flex min-h-11 items-center gap-2 py-2 text-sm text-veridan-ink">
           <input
             type="checkbox"
             name="urgency_flag"
-            className="h-4 w-4 rounded border-veridan-warm-gray-light accent-[var(--color-accent)]"
+            className="h-4 w-4 shrink-0 rounded border-veridan-warm-gray-light accent-[var(--color-accent)]"
           />
           This is urgent (safety, code compliance, or building-operations issue)
         </label>
       </fieldset>
 
-      <fieldset className="space-y-3">
+      <fieldset className="space-y-1">
         <legend className="text-sm font-semibold uppercase tracking-wide text-veridan-ink">
           Which best describes you?
         </legend>
-        <label className="flex items-start gap-2 text-sm text-veridan-ink">
+        <label className="flex min-h-11 items-start gap-2 py-2 text-sm text-veridan-ink">
           <input
             type="radio"
             name="retrofit_pathway"
             value="owner_direct"
             required
-            className="mt-0.5 h-4 w-4 accent-[var(--color-accent)]"
+            className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--color-accent)]"
           />
           <span>I&rsquo;m the building owner or facilities manager, sourcing directly.</span>
         </label>
-        <label className="flex items-start gap-2 text-sm text-veridan-ink">
+        <label className="flex min-h-11 items-start gap-2 py-2 text-sm text-veridan-ink">
           <input
             type="radio"
             name="retrofit_pathway"
             value="contractor_instructed"
             required
-            className="mt-0.5 h-4 w-4 accent-[var(--color-accent)]"
+            className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--color-accent)]"
           />
           <span>I&rsquo;m a contractor, sourcing on the owner&rsquo;s instruction.</span>
         </label>
@@ -175,12 +175,13 @@ export function RetrofitForm() {
         <button
           type="submit"
           disabled={pending}
-          className="inline-flex items-center justify-center gap-2 bg-veridan-accent px-8 py-3 text-sm font-medium uppercase tracking-wide text-veridan-ink transition-colors duration-200 hover:bg-veridan-accent-soft disabled:opacity-50"
+          aria-describedby={state.ok === false ? `${formId}-submit-error` : undefined}
+          className="inline-flex items-center justify-center gap-2 bg-veridan-accent px-8 py-3 text-sm font-medium uppercase tracking-wide text-veridan-ink transition-colors duration-200 hover:bg-veridan-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-veridan-accent focus-visible:ring-offset-2 disabled:opacity-50"
         >
           {pending ? "Submitting…" : "Submit Request"}
         </button>
         {state.ok === false && (
-          <p role="alert" className={`${fieldErrorClass} mt-3`}>
+          <p id={`${formId}-submit-error`} role="alert" className={`${fieldErrorClass} mt-3`}>
             {state.error}
           </p>
         )}

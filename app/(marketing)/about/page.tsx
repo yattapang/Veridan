@@ -42,7 +42,7 @@ export default function AboutPage() {
                 <h3 className="text-xl font-semibold text-veridan-ink">
                   {f.name}
                 </h3>
-                <p className="mt-1 text-sm font-medium uppercase tracking-wide text-veridan-accent">
+                <p className="mt-1 text-sm font-medium uppercase tracking-wide text-veridan-accent-text">
                   {f.role}
                 </p>
                 <p className="mt-4 text-sm leading-relaxed text-veridan-warm-gray">

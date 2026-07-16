@@ -25,7 +25,7 @@ export function PageHero({
         {kicker && (
           <p
             className={`mb-4 text-xs font-semibold uppercase tracking-[0.3em] ${
-              dark ? "text-veridan-accent-soft" : "text-veridan-accent"
+              dark ? "text-veridan-accent-soft" : "text-veridan-accent-text"
             }`}
           >
             {kicker}

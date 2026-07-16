@@ -27,7 +27,7 @@ export function SiteHeader() {
               <Link
                 key={link.href}
                 href={link.href}
-                className={`text-sm font-medium uppercase tracking-wide transition-colors ${
+                className={`rounded-sm text-sm font-medium uppercase tracking-wide transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-veridan-accent focus-visible:ring-offset-2 ${
                   active
                     ? "text-veridan-ink"
                     : "text-veridan-warm-gray hover:text-veridan-ink"
@@ -49,8 +49,9 @@ export function SiteHeader() {
           type="button"
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
+          aria-controls="mobile-nav-menu"
           aria-label="Toggle navigation menu"
-          className="flex h-10 w-10 flex-col items-center justify-center gap-1.5 lg:hidden"
+          className="flex h-11 w-11 flex-col items-center justify-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-veridan-accent focus-visible:ring-offset-2 lg:hidden"
         >
           <span
             className={`block h-px w-6 bg-veridan-ink transition-transform ${
@@ -71,14 +72,17 @@ export function SiteHeader() {
       </Container>
 
       {open && (
-        <div className="border-t border-veridan-line/10 bg-veridan-paper lg:hidden">
+        <div
+          id="mobile-nav-menu"
+          className="border-t border-veridan-line/10 bg-veridan-paper lg:hidden"
+        >
           <Container className="flex flex-col gap-1 py-4">
             {navLinks.map((link) => (
               <Link
                 key={link.href}
                 href={link.href}
                 onClick={() => setOpen(false)}
-                className="py-3 text-sm font-medium uppercase tracking-wide text-veridan-ink border-b border-veridan-line/5 last:border-b-0"
+                className="py-3 text-sm font-medium uppercase tracking-wide text-veridan-ink border-b border-veridan-line/5 last:border-b-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-veridan-accent focus-visible:ring-offset-2"
               >
                 {link.label}
               </Link>

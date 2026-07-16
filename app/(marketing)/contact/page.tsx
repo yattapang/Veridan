@@ -70,7 +70,7 @@ export default function ContactPage() {
             </p>
             <a
               href={`mailto:${contactInfo.email}`}
-              className="mt-2 block text-lg font-medium text-veridan-ink hover:text-veridan-accent"
+              className="mt-2 block text-lg font-medium text-veridan-ink hover:text-veridan-accent-text"
             >
               {contactInfo.email}
             </a>

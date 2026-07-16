@@ -83,14 +83,23 @@ export async function submitEnquiry(
   honeypotTripped: boolean,
   notification: NotificationSummaryInput
 ): Promise<SubmitEnquiryResult> {
-  const ip = await getClientIp();
-  const rateLimit = checkRateLimit(`enquiry:${ip}`, 5, 15 * 60 * 1000);
-  if (!rateLimit.allowed) {
-    return {
-      ok: false,
-      error:
-        "Too many submissions from this connection recently. Please wait a few minutes and try again, or email us directly.",
-    };
+  // Fail-open by design (Task 23): if IP extraction or the in-memory
+  // limiter itself throws for any reason, log it and let the submission
+  // through rather than blocking a legitimate visitor because of a bug in
+  // the spam-control layer. Rejecting on a limiter error would turn an
+  // availability bug into an outage for every real customer.
+  try {
+    const ip = await getClientIp();
+    const rateLimit = checkRateLimit(`enquiry:${ip}`, 5, 15 * 60 * 1000);
+    if (!rateLimit.allowed) {
+      return {
+        ok: false,
+        error:
+          "Too many submissions from this connection recently. Please wait a few minutes and try again, or email us directly.",
+      };
+    }
+  } catch (err) {
+    console.error("[enquiries] Rate limiter failed; failing open:", err);
   }
 
   let supabase;

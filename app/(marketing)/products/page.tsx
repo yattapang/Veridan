@@ -37,7 +37,7 @@ export default function ProductsPage() {
                   </p>
                 </div>
                 {cat.brands.length > 0 && (
-                  <p className="mt-6 text-xs font-medium uppercase tracking-wide text-veridan-accent">
+                  <p className="mt-6 text-xs font-medium uppercase tracking-wide text-veridan-accent-text">
                     {cat.brands.join(" · ")}
                   </p>
                 )}

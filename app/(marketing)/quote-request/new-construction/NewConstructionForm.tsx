@@ -152,7 +152,8 @@ export function NewConstructionForm() {
           <button
             type="button"
             onClick={() => setScheduleMode("file")}
-            className={`px-4 py-2 text-xs font-medium uppercase tracking-wide transition-colors ${
+            aria-pressed={scheduleMode === "file"}
+            className={`min-h-11 px-4 py-2 text-xs font-medium uppercase tracking-wide transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-veridan-accent focus-visible:ring-offset-2 ${
               scheduleMode === "file"
                 ? "bg-veridan-ink text-veridan-paper"
                 : "border border-veridan-warm-gray-light text-veridan-warm-gray"
@@ -163,7 +164,8 @@ export function NewConstructionForm() {
           <button
             type="button"
             onClick={() => setScheduleMode("structured")}
-            className={`px-4 py-2 text-xs font-medium uppercase tracking-wide transition-colors ${
+            aria-pressed={scheduleMode === "structured"}
+            className={`min-h-11 px-4 py-2 text-xs font-medium uppercase tracking-wide transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-veridan-accent focus-visible:ring-offset-2 ${
               scheduleMode === "structured"
                 ? "bg-veridan-ink text-veridan-paper"
                 : "border border-veridan-warm-gray-light text-veridan-warm-gray"
@@ -228,7 +230,8 @@ export function NewConstructionForm() {
                   type="button"
                   onClick={() => setRows((prev) => prev.filter((r) => r.key !== row.key))}
                   disabled={rows.length === 1}
-                  className="mt-1.5 self-start text-xs font-medium uppercase tracking-wide text-veridan-warm-gray hover:text-veridan-ink disabled:opacity-40 sm:mt-0"
+                  aria-label="Remove this line item"
+                  className="-mx-2.5 -my-2 min-h-11 self-start px-2.5 py-2 text-xs font-medium uppercase tracking-wide text-veridan-warm-gray hover:text-veridan-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-veridan-accent focus-visible:ring-offset-2 disabled:opacity-40"
                 >
                   Remove
                 </button>
@@ -237,7 +240,7 @@ export function NewConstructionForm() {
             <button
               type="button"
               onClick={() => setRows((prev) => [...prev, newRow()])}
-              className="text-xs font-medium uppercase tracking-wide text-veridan-accent hover:text-veridan-ink"
+              className="-mx-2.5 -my-2 min-h-11 px-2.5 py-2 text-xs font-medium uppercase tracking-wide text-veridan-accent-text hover:text-veridan-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-veridan-accent focus-visible:ring-offset-2"
             >
               + Add another line
             </button>
@@ -261,12 +264,13 @@ export function NewConstructionForm() {
         <button
           type="submit"
           disabled={pending}
-          className="inline-flex items-center justify-center gap-2 bg-veridan-accent px-8 py-3 text-sm font-medium uppercase tracking-wide text-veridan-ink transition-colors duration-200 hover:bg-veridan-accent-soft disabled:opacity-50"
+          aria-describedby={state.ok === false ? `${formId}-submit-error` : undefined}
+          className="inline-flex items-center justify-center gap-2 bg-veridan-accent px-8 py-3 text-sm font-medium uppercase tracking-wide text-veridan-ink transition-colors duration-200 hover:bg-veridan-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-veridan-accent focus-visible:ring-offset-2 disabled:opacity-50"
         >
           {pending ? "Submitting…" : "Submit Request"}
         </button>
         {state.ok === false && (
-          <p role="alert" className={`${fieldErrorClass} mt-3`}>
+          <p id={`${formId}-submit-error`} role="alert" className={`${fieldErrorClass} mt-3`}>
             {state.error}
           </p>
         )}

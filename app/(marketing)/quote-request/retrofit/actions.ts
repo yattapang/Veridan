@@ -6,6 +6,15 @@ import {
   readHoneypotTripped,
   type EnquiryInsertPayload,
 } from "@/lib/enquiries/submit";
+import {
+  isValidEmail,
+  normalizeSingleLine,
+  normalizeMultiLine,
+  MAX_SHORT_TEXT_LENGTH,
+  MAX_EMAIL_LENGTH,
+  MAX_PHONE_LENGTH,
+  MAX_LONG_TEXT_LENGTH,
+} from "@/lib/enquiries/validation";
 
 export type SubmitState = { ok: true } | { ok: false; error: string };
 
@@ -20,25 +29,29 @@ const BUILDING_TYPES = new Set([
 
 const RETROFIT_PATHWAYS = new Set(["owner_direct", "contractor_instructed"]);
 
-function isValidEmail(value: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-}
-
 export async function submitRetrofitEnquiry(
   _prevState: SubmitState,
   formData: FormData
 ): Promise<SubmitState> {
   const honeypotTripped = readHoneypotTripped(formData);
 
-  const companyName = String(formData.get("company_name") ?? "").trim();
-  const contactName = String(formData.get("contact_name") ?? "").trim();
-  const contactEmail = String(formData.get("contact_email") ?? "").trim();
-  const contactPhone = String(formData.get("contact_phone") ?? "").trim();
-  const buildingType = String(formData.get("building_type") ?? "").trim();
-  const failingDescription = String(formData.get("failing_hardware_description") ?? "").trim();
+  const companyName = normalizeSingleLine(formData.get("company_name"), MAX_SHORT_TEXT_LENGTH);
+  const contactName = normalizeSingleLine(formData.get("contact_name"), MAX_SHORT_TEXT_LENGTH);
+  const contactEmail = normalizeSingleLine(formData.get("contact_email"), MAX_EMAIL_LENGTH);
+  const contactPhone = normalizeSingleLine(formData.get("contact_phone"), MAX_PHONE_LENGTH);
+  // building_type is validated against a fixed enum below, so a short cap
+  // here is just defense-in-depth, not the primary check.
+  const buildingType = normalizeSingleLine(formData.get("building_type"), MAX_SHORT_TEXT_LENGTH);
+  const failingDescription = normalizeMultiLine(
+    formData.get("failing_hardware_description"),
+    MAX_LONG_TEXT_LENGTH
+  );
   const urgencyFlag = formData.get("urgency_flag") === "on";
-  const retrofitPathway = String(formData.get("retrofit_pathway") ?? "").trim();
-  const notes = String(formData.get("notes") ?? "").trim();
+  const retrofitPathway = normalizeSingleLine(
+    formData.get("retrofit_pathway"),
+    MAX_SHORT_TEXT_LENGTH
+  );
+  const notes = normalizeMultiLine(formData.get("notes"), MAX_LONG_TEXT_LENGTH);
 
   if (!honeypotTripped) {
     if (!contactName) return { ok: false, error: "Contact name is required." };

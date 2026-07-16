@@ -17,7 +17,7 @@ export function Wordmark({
   return (
     <Link
       href="/"
-      className={`inline-flex items-baseline gap-2 font-semibold tracking-[0.2em] uppercase ${
+      className={`inline-flex items-baseline gap-2 rounded-sm font-semibold tracking-[0.2em] uppercase focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-veridan-accent focus-visible:ring-offset-2 ${
         dark ? "text-veridan-paper" : "text-veridan-ink"
       } ${className}`}
     >

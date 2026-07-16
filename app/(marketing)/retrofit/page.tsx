@@ -105,7 +105,7 @@ export default function RetrofitPage() {
               </p>
             </div>
             <div className="border-2 border-veridan-accent p-8">
-              <p className="text-xs font-semibold uppercase tracking-widest text-veridan-accent">
+              <p className="text-xs font-semibold uppercase tracking-widest text-veridan-accent-text">
                 Commercial-Grade Hardware
               </p>
               <p className="mt-4 text-3xl font-semibold text-veridan-ink">

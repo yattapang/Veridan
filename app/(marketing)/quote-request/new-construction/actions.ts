@@ -6,12 +6,20 @@ import {
   readHoneypotTripped,
   type EnquiryInsertPayload,
 } from "@/lib/enquiries/submit";
+import {
+  isValidEmail,
+  isReasonableLineItemCount,
+  normalizeSingleLine,
+  normalizeMultiLine,
+  MAX_SHORT_TEXT_LENGTH,
+  MAX_EMAIL_LENGTH,
+  MAX_PHONE_LENGTH,
+  MAX_LONG_TEXT_LENGTH,
+  MAX_LINE_ITEM_FIELD_LENGTH,
+  MAX_LINE_ITEMS,
+} from "@/lib/enquiries/validation";
 
 export type SubmitState = { ok: true } | { ok: false; error: string };
-
-function isValidEmail(value: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-}
 
 interface ParsedLineItem {
   description: string;
@@ -26,9 +34,9 @@ function parseStructuredLineItems(formData: FormData): ParsedLineItem[] {
 
   const rows: ParsedLineItem[] = [];
   for (let i = 0; i < descriptions.length; i++) {
-    const description = String(descriptions[i] ?? "").trim();
-    const qty = String(qtys[i] ?? "").trim();
-    const note = String(notes[i] ?? "").trim();
+    const description = normalizeSingleLine(descriptions[i], MAX_LINE_ITEM_FIELD_LENGTH);
+    const qty = normalizeSingleLine(qtys[i], MAX_LINE_ITEM_FIELD_LENGTH);
+    const note = normalizeSingleLine(notes[i], MAX_LINE_ITEM_FIELD_LENGTH);
     if (!description && !qty && !note) continue; // skip fully-blank rows
     rows.push({ description, qty, notes: note });
   }
@@ -41,14 +49,17 @@ export async function submitNewConstructionEnquiry(
 ): Promise<SubmitState> {
   const honeypotTripped = readHoneypotTripped(formData);
 
-  const companyName = String(formData.get("company_name") ?? "").trim();
-  const contactName = String(formData.get("contact_name") ?? "").trim();
-  const contactEmail = String(formData.get("contact_email") ?? "").trim();
-  const contactPhone = String(formData.get("contact_phone") ?? "").trim();
-  const projectName = String(formData.get("project_name") ?? "").trim();
-  const siteLocation = String(formData.get("site_location") ?? "").trim();
-  const deliveryTimeframe = String(formData.get("delivery_timeframe") ?? "").trim();
-  const notes = String(formData.get("notes") ?? "").trim();
+  const companyName = normalizeSingleLine(formData.get("company_name"), MAX_SHORT_TEXT_LENGTH);
+  const contactName = normalizeSingleLine(formData.get("contact_name"), MAX_SHORT_TEXT_LENGTH);
+  const contactEmail = normalizeSingleLine(formData.get("contact_email"), MAX_EMAIL_LENGTH);
+  const contactPhone = normalizeSingleLine(formData.get("contact_phone"), MAX_PHONE_LENGTH);
+  const projectName = normalizeSingleLine(formData.get("project_name"), MAX_SHORT_TEXT_LENGTH);
+  const siteLocation = normalizeSingleLine(formData.get("site_location"), MAX_SHORT_TEXT_LENGTH);
+  const deliveryTimeframe = normalizeSingleLine(
+    formData.get("delivery_timeframe"),
+    MAX_SHORT_TEXT_LENGTH
+  );
+  const notes = normalizeMultiLine(formData.get("notes"), MAX_LONG_TEXT_LENGTH);
   const scheduleMode = String(formData.get("schedule_mode") ?? "file");
 
   if (!honeypotTripped) {
@@ -72,6 +83,18 @@ export async function submitNewConstructionEnquiry(
         error:
           "Add at least one hardware line item, or switch to file upload and attach a schedule.",
       };
+    }
+    if (!honeypotTripped && !isReasonableLineItemCount(lineItems.length)) {
+      return {
+        ok: false,
+        error: `Too many line items in one submission (max ${MAX_LINE_ITEMS}). Please split this into multiple requests or upload a file instead.`,
+      };
+    }
+    // Honeypot-tripped submissions are never rejected with a visible error
+    // (see submitEnquiry's honeypot handling) — just clamp so an
+    // absurdly padded bot payload can't bloat the row we insert for review.
+    if (honeypotTripped && lineItems.length > MAX_LINE_ITEMS) {
+      lineItems = lineItems.slice(0, MAX_LINE_ITEMS);
     }
   } else if (!honeypotTripped && !uploadedFile) {
     return {

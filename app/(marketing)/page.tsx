@@ -109,7 +109,7 @@ export default function HomePage() {
                 </div>
                 <Link
                   href={line.href}
-                  className="mt-8 inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-veridan-accent hover:text-veridan-ink"
+                  className="mt-8 inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-veridan-accent-text hover:text-veridan-ink"
                 >
                   Learn more →
                 </Link>

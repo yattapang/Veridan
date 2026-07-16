@@ -20,6 +20,17 @@
   --color-accent: #a9895c;
   --color-accent-soft: #c9ac7e;
   --color-line: #26241f;
+
+  /*
+   * Task 24 accessibility pass: --color-accent (#a9895c) on --color-paper
+   * (#faf9f6) measures ~3.1:1, below the 4.5:1 WCAG AA floor for
+   * normal-size body/label text (it's fine as a large-text accent or as a
+   * button/border color, just not for small text-on-paper). This darker
+   * shade of the same brass hue measures ~4.6:1 on paper and is used
+   * anywhere the accent color is applied to small text rather than a
+   * background, border, or large heading.
+   */
+  --color-accent-text: #8a6d45;
 }
 
 @theme inline {
@@ -36,6 +47,7 @@
   --color-veridan-warm-gray-pale: var(--color-warm-gray-pale);
   --color-veridan-accent: var(--color-accent);
   --color-veridan-accent-soft: var(--color-accent-soft);
+  --color-veridan-accent-text: var(--color-accent-text);
   --color-veridan-line: var(--color-line);
 }
 

@@ -12,7 +12,7 @@ export function SectionHeading({
   return (
     <div className={align === "center" ? "mx-auto max-w-2xl text-center" : "max-w-2xl"}>
       {kicker && (
-        <p className="mb-3 text-xs font-semibold uppercase tracking-[0.3em] text-veridan-accent">
+        <p className="mb-3 text-xs font-semibold uppercase tracking-[0.3em] text-veridan-accent-text">
           {kicker}
         </p>
       )}
