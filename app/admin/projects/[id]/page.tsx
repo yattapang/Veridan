@@ -7,6 +7,7 @@ import type {
   HardwareSetLineItemWithDetails,
   HardwareSetRow,
   ProjectWithCompany,
+  QuoteRow,
 } from "@/lib/supabase/types";
 import { InstructiveMessage } from "@/components/admin/InstructiveMessage";
 import { nextSetCode, summarizeSetUsd, type SupplierFxRates } from "@/lib/hardware-sets";
@@ -14,6 +15,8 @@ import { ProjectHeaderForm } from "./ProjectHeaderForm";
 import { AddHardwareSetForm } from "./AddHardwareSetForm";
 import { CloneSetForm, type CloneableSetOption } from "./CloneSetForm";
 import { HardwareSetCard } from "./HardwareSetCard";
+import { CreateQuoteButton } from "./CreateQuoteButton";
+import { QUOTE_STATUS_LABELS, QUOTE_STATUS_BADGE, formatUsd, formatJmd } from "@/lib/quotes/format";
 
 export async function generateMetadata({
   params,
@@ -88,7 +91,7 @@ export default async function ProjectDetailPage({
     notFound();
   }
 
-  const [companiesResult, setsResult, cloneOptionsResult, fxParamResult, doorCountResult] = await Promise.all([
+  const [companiesResult, setsResult, cloneOptionsResult, fxParamResult, doorCountResult, quotesResult] = await Promise.all([
     supabase.from("companies").select("*").order("name"),
     supabase.from("hardware_sets").select("*").eq("project_id", id).order("code"),
     supabase
@@ -99,9 +102,12 @@ export default async function ProjectDetailPage({
       .order("code"),
     supabase.from("business_parameters").select("*").eq("key", "supplier_fx_rates").maybeSingle(),
     supabase.from("doors").select("id", { count: "exact", head: true }).eq("project_id", id),
+    supabase.from("quotes").select("*").eq("project_id", id).order("created_at", { ascending: false }),
   ]);
 
   const doorCount = doorCountResult.count ?? 0;
+  const quotes = (quotesResult.data as QuoteRow[]) ?? [];
+  const assignedDoorCount = doorCount; // doors exist; quote materialization uses those with a set assigned
 
   const companies = (companiesResult.data as CompanyRow[]) ?? [];
   const sets = (setsResult.data as HardwareSetRow[]) ?? [];
@@ -208,6 +214,59 @@ export default async function ProjectDetailPage({
             Open Door Register →
           </Link>
         </div>
+      </section>
+
+      <section className="mt-8 rounded-md border border-veridan-warm-gray-light bg-white px-5 py-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">
+              Quotes
+            </h2>
+            <p className="mt-1 text-xs text-veridan-warm-gray">
+              Door Register mode: snapshots parameters + FX, materializes line items from
+              the doors&apos; hardware sets, and groups suppliers into shipment origins.
+            </p>
+          </div>
+          <CreateQuoteButton
+            projectId={project.id}
+            disabled={assignedDoorCount === 0}
+            disabledReason={
+              assignedDoorCount === 0
+                ? "Add doors and assign hardware sets in the Door Register first."
+                : undefined
+            }
+          />
+        </div>
+
+        {quotes.length === 0 ? (
+          <p className="mt-4 text-sm text-veridan-warm-gray">No quotes for this project yet.</p>
+        ) : (
+          <ul className="mt-4 divide-y divide-veridan-warm-gray-light border-t border-veridan-warm-gray-light">
+            {quotes.map((quote) => (
+              <li key={quote.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                <div className="flex items-center gap-3">
+                  <Link
+                    href={`/admin/quotes/${quote.id}`}
+                    className="text-sm font-medium text-veridan-accent underline underline-offset-2 hover:text-veridan-accent-soft"
+                  >
+                    {quote.quote_ref}
+                  </Link>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${QUOTE_STATUS_BADGE[quote.status]}`}
+                  >
+                    {QUOTE_STATUS_LABELS[quote.status]}
+                  </span>
+                  {quote.revision_number > 1 && (
+                    <span className="text-xs text-veridan-warm-gray">rev {quote.revision_number}</span>
+                  )}
+                </div>
+                <div className="text-xs text-veridan-warm-gray">
+                  Landed {formatUsd(quote.total_landed_usd)} · Client {formatJmd(quote.total_client_jmd)}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <section className="mt-10">

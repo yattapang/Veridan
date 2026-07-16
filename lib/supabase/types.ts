@@ -263,3 +263,183 @@ export interface HardwareSetLineItemWithDetails extends HardwareSetLineItemRow {
   } | null;
   suppliers: { id: string; name: string; default_currency: CurrencyCode } | null;
 }
+
+// ---------------------------------------------------------------------------
+// §1.7 / §1.8 / §1.9 — Quotes, Quote Origins, Quote Line Items (Task 16)
+// ---------------------------------------------------------------------------
+
+export type QuoteStatus =
+  | "draft"
+  | "approved"
+  | "sent"
+  | "viewed"
+  | "accepted"
+  | "declined"
+  | "expired";
+
+export type QuoteMode = "door_register" | "line_item";
+
+/** §1.7 fx_snapshot jsonb payload (values locked at quote_date). */
+export interface FxSnapshotStored {
+  bank_sell_rate: number;
+  fx_buffer_pct: number;
+  effective_rate: number;
+  supplier_rates: Partial<Record<CurrencyCode, number>>;
+  source: string;
+  as_of: string;
+}
+
+/**
+ * §1.7 parameters_snapshot jsonb payload — a full, typed copy of every
+ * business parameter that the landed-cost engine or the quote document reads,
+ * frozen at quote_date so later parameter edits never rewrite this quote.
+ */
+export interface ParametersSnapshotStored {
+  duty_gct_pct: number;
+  marine_insurance_pct: number;
+  brokerage_first_pallet_usd: number;
+  brokerage_addl_pallet_usd: number;
+  port_handling_usd: number;
+  freight_insurance_fallback_usd: number;
+  procurement_handling_fee_usd: number;
+  contingency_pct: number;
+  margin_tiers: number[];
+  margin_floor_pct: number;
+  min_order_value_usd: number;
+  deposit_standard_pct: number;
+  quote_validity_days: number;
+  default_finish: string;
+  gct_enabled: boolean;
+  gct_rate_pct: number;
+  lead_times: Record<string, string>;
+  company_details: Record<string, string>;
+}
+
+/** §1.7 Quotes */
+export interface QuoteRow {
+  id: string;
+  project_id: string;
+  quote_ref: string;
+  revision_number: number;
+  parent_quote_id: string | null;
+  status: QuoteStatus;
+  quote_mode: QuoteMode;
+  quote_date: string;
+  validity_days: number;
+  architect_company_id: string | null;
+  deposit_pct: number;
+  margin_pct: number;
+  margin_override_reason: string | null;
+  parameters_snapshot: ParametersSnapshotStored;
+  fx_snapshot: FxSnapshotStored;
+  total_landed_usd: number | null;
+  total_client_jmd: number | null;
+  total_client_usd: number | null;
+  sent_at: string | null;
+  viewed_at: string | null;
+  accepted_at: string | null;
+  declined_at: string | null;
+  pdf_storage_path: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Quote joined with project + client company, for the list/detail header. */
+export interface QuoteWithProject extends QuoteRow {
+  projects: {
+    id: string;
+    name: string;
+    companies: { id: string; name: string } | null;
+  } | null;
+}
+
+/** §1.8 Quote Origins (shipment cost pools per quote) */
+export interface QuoteOriginRow {
+  id: string;
+  quote_id: string;
+  origin_label: string;
+  supplier_invoice_total: number | null;
+  freight_export_fees_usd: number;
+  ocean_freight_usd: number | null;
+  marine_insurance_usd: number | null;
+  port_handling_usd: number | null;
+  brokerage_usd: number | null;
+  pallet_count: number;
+  duty_gct_pct: number | null;
+  cif_basis_usd: number | null;
+  total_shipment_cost_usd: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** §1.9 Quote Line Items */
+export interface QuoteLineItemRow {
+  id: string;
+  quote_id: string;
+  door_id: string | null;
+  hardware_set_id: string | null;
+  product_id: string;
+  quote_origin_id: string;
+  description_override: string | null;
+  qty: number;
+  unit_cost: number;
+  cost_currency: CurrencyCode;
+  unit_cost_usd: number;
+  line_value_usd: number;
+  allocated_shipment_cost_usd: number | null;
+  landed_cost_usd: number;
+  margin_pct_override: number | null;
+  sort_order: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Line item joined with product/door/hardware-set for the builder grid. */
+export interface QuoteLineItemWithDetails extends QuoteLineItemRow {
+  products: {
+    id: string;
+    description: string;
+    manufacturer: string | null;
+    product_ref: string | null;
+    unit: string;
+  } | null;
+  doors: { id: string; door_number: string; floor: string | null } | null;
+  hardware_sets: { id: string; code: string; name: string | null } | null;
+}
+
+/** §1.16 Override Log */
+export type OverrideType =
+  | "margin_below_tier"
+  | "margin_below_floor"
+  | "price_below_landed_cost";
+
+export interface OverrideLogRow {
+  id: string;
+  quote_id: string;
+  override_type: OverrideType;
+  requested_margin_pct: number | null;
+  landed_cost_usd: number | null;
+  quoted_price_usd: number | null;
+  reason: string;
+  overridden_by: string | null;
+  created_at: string;
+}
+
+/** Override log joined with the user who created it, for display. */
+export interface OverrideLogWithUser extends OverrideLogRow {
+  users: { id: string; email: string; display_name: string | null } | null;
+}
+
+/**
+ * A de-duplicated summary of the engine's per-line margin flags, grouped by
+ * breach type, used by the builder's override-capture UI (Task 16). `type`
+ * mirrors OverrideType / the engine's MarginFlagType.
+ */
+export interface MarginFlagSummary {
+  type: OverrideType;
+  lineCount: number;
+  minMarginPct: number;
+  landedCostUsd: number;
+  clientPriceUsd: number;
+}
