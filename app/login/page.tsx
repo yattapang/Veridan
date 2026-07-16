@@ -1,13 +1,12 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { syncUserRecord } from "@/lib/auth";
 
 function LoginForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -34,8 +33,17 @@ function LoginForm() {
       if (syncError) {
         console.error("[veridan:login] User record sync failed:", syncError);
       }
-      router.push(searchParams.get("redirect") ?? "/admin");
-      router.refresh();
+      // Full-page navigation, NOT router.push: the client router cache may
+      // hold the pre-auth "/admin → /login" redirect payload, which makes a
+      // successful sign-in appear to do nothing. A hard navigation forces a
+      // fresh server round-trip with the new auth cookies.
+      // Only allow same-origin relative paths (no "//host" or absolute URLs).
+      const redirectParam = searchParams.get("redirect");
+      const target =
+        redirectParam?.startsWith("/") && !redirectParam.startsWith("//")
+          ? redirectParam
+          : "/admin";
+      window.location.assign(target);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign-in failed.");
     } finally {
