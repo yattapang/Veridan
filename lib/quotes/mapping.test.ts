@@ -181,6 +181,7 @@ describe("snapshot immutability", () => {
       door_id: "D1",
       hardware_set_id: "HW01",
       product_id: "P1",
+      supplier_id: null,
       quote_origin_id: originId,
       description_override: null,
       qty: 1,
