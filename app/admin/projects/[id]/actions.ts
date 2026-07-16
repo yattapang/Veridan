@@ -436,3 +436,78 @@ export async function createDoorRegisterQuote(
   revalidatePath(`/admin/projects/${projectId}`);
   redirect(`/admin/quotes/${quoteId}`);
 }
+
+/**
+ * Creates a line_item-mode quote (Task 17 — retrofit/simple jobs, §6.2) from
+ * a project. Unlike the Door Register pipeline, there is no register to
+ * materialize from: the quote is created empty (no origins, no lines) and the
+ * founder adds product/ad-hoc lines directly on the builder page, which
+ * regroups origin pools after every edit (lib/quotes/persist.ts
+ * regroupLineItemOrigins). Same parameter/FX snapshot freeze as door_register
+ * (§1.7) so the quote's numbers are immune to later parameter edits either
+ * way.
+ */
+export async function createLineItemQuote(projectId: string): Promise<ProjectActionResult> {
+  let supabase;
+  try {
+    supabase = await createClient();
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Supabase is not configured." };
+  }
+
+  const user = await getCurrentUser();
+  if (!user) {
+    return { ok: false, error: "You must be signed in to create a quote." };
+  }
+
+  const { data: project, error: projectError } = await supabase
+    .from("projects")
+    .select("id, name")
+    .eq("id", projectId)
+    .maybeSingle();
+  if (projectError) return { ok: false, error: `Could not load the project: ${projectError.message}` };
+  if (!project) return { ok: false, error: "Project not found." };
+
+  const { data: paramRows, error: paramError } = await supabase.from("business_parameters").select("*");
+  if (paramError) return { ok: false, error: `Could not load business parameters: ${paramError.message}` };
+
+  const parameters = (paramRows as BusinessParameterRow[]) ?? [];
+  const quoteDate = new Date().toISOString().slice(0, 10);
+  const parametersSnapshot = buildParametersSnapshot(parameters);
+  const fxSnapshot = buildFxSnapshot(parameters, quoteDate);
+
+  const year = Number(quoteDate.slice(0, 4));
+  const { data: existingRefRows, error: refError } = await supabase
+    .from("quotes")
+    .select("quote_ref")
+    .like("quote_ref", `VQ-${year}-%`);
+  if (refError) return { ok: false, error: `Could not generate a quote reference: ${refError.message}` };
+  const quoteRef = nextQuoteRef(year, ((existingRefRows as Array<{ quote_ref: string }>) ?? []).map((r) => r.quote_ref));
+
+  const marginTiers = parametersSnapshot.margin_tiers;
+  const defaultMargin = marginTiers.length > 0 ? marginTiers[0] : 30;
+  const { data: insertedQuote, error: quoteInsertError } = await supabase
+    .from("quotes")
+    .insert({
+      project_id: projectId,
+      quote_ref: quoteRef,
+      status: "draft",
+      quote_mode: "line_item",
+      quote_date: quoteDate,
+      validity_days: parametersSnapshot.quote_validity_days,
+      deposit_pct: parametersSnapshot.deposit_standard_pct,
+      margin_pct: defaultMargin,
+      parameters_snapshot: parametersSnapshot,
+      fx_snapshot: fxSnapshot,
+      created_by: user.id,
+    })
+    .select("id")
+    .single();
+  if (quoteInsertError || !insertedQuote) {
+    return { ok: false, error: `Could not create the quote: ${quoteInsertError?.message ?? "unknown error"}` };
+  }
+
+  revalidatePath("/admin/quotes");
+  revalidatePath(`/admin/projects/${projectId}`);
+  redirect(`/admin/quotes/${insertedQuote.id as string}`);
+}

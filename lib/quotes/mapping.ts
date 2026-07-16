@@ -122,6 +122,53 @@ export function supplierOriginLabelMap(groups: OriginGroup[]): Map<string, strin
 }
 
 // ---------------------------------------------------------------------------
+// Origin regrouping for line_item mode (Task 17)
+// ---------------------------------------------------------------------------
+//
+// door_register mode assigns each line's origin ONCE, at quote-materialization
+// time (createDoorRegisterQuote), from the hardware set line's supplier — the
+// origin pools never move again. line_item mode has no such one-shot step:
+// lines are added/edited/removed one at a time directly on the draft quote,
+// so the origin pools must be re-derived from whichever suppliers are
+// currently on the quote every time a line changes. This diffs the labels the
+// CURRENT lines need (via buildOriginGroups, the same grouping Task 16 uses)
+// against the quote's EXISTING quote_origins rows, so the caller
+// (lib/quotes/persist.ts regroupLineItemOrigins) knows which origins to
+// create, which to leave alone, and which are now orphaned and safe to
+// delete. Pure — no I/O, no Supabase — so it's unit-testable on its own.
+
+export interface ExistingOriginRef {
+  id: string;
+  origin_label: string;
+}
+
+export interface OriginRegroupPlan {
+  /** Labels the current lines need that have no existing origin row yet. */
+  labelsToCreate: string[];
+  /** Existing origin ids whose label no longer has any line pointing at it. */
+  originIdsToRemove: string[];
+  /** label → existing origin id, for labels that already have a row. */
+  existingIdByLabel: Map<string, string>;
+}
+
+export function planOriginRegroup(
+  existingOrigins: ExistingOriginRef[],
+  groups: OriginGroup[],
+): OriginRegroupPlan {
+  const neededLabels = new Set(groups.map((g) => g.label));
+  const existingIdByLabel = new Map<string, string>();
+  for (const o of existingOrigins) existingIdByLabel.set(o.origin_label, o.id);
+
+  const labelsToCreate = groups.map((g) => g.label).filter((label) => !existingIdByLabel.has(label));
+
+  const originIdsToRemove = existingOrigins
+    .filter((o) => !neededLabels.has(o.origin_label))
+    .map((o) => o.id);
+
+  return { labelsToCreate, originIdsToRemove, existingIdByLabel };
+}
+
+// ---------------------------------------------------------------------------
 // DB row → engine input adapters
 // ---------------------------------------------------------------------------
 

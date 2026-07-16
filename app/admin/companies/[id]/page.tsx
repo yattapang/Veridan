@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import type { CompanyRow, ContactRow } from "@/lib/supabase/types";
+import type { CompanyRow, ContactRow, ProjectRow } from "@/lib/supabase/types";
 import { InstructiveMessage } from "@/components/admin/InstructiveMessage";
 import { CompanyForm } from "../CompanyForm";
 import { ContactForm } from "./ContactForm";
 import { ContactRow as ContactRowItem } from "./ContactRow";
+import { CompanyQuoteForm } from "./CompanyQuoteForm";
 
 export async function generateMetadata({
   params,
@@ -86,6 +87,18 @@ export default async function CompanyDetailPage({
     // query fails while the company record itself loaded fine.
   }
 
+  let projects: ProjectRow[] = [];
+  try {
+    const { data, error } = await supabase
+      .from("projects")
+      .select("*")
+      .eq("company_id", id)
+      .order("created_at", { ascending: false });
+    if (!error) projects = (data as ProjectRow[]) ?? [];
+  } catch {
+    // Best-effort, same as contacts above.
+  }
+
   return (
     <div className="max-w-3xl">
       <Link
@@ -135,12 +148,38 @@ export default async function CompanyDetailPage({
 
       <section className="mt-10">
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">
-          Order history
+          Projects
         </h2>
-        <InstructiveMessage
-          title="Coming later"
-          body="Projects, quotes, and orders for this company will appear here once the projects and quoting build-out lands (later tasks in the build plan)."
-        />
+        {projects.length === 0 ? (
+          <p className="mb-6 text-sm text-veridan-warm-gray">No projects for this company yet.</p>
+        ) : (
+          <ul className="mb-6 rounded-md border border-veridan-warm-gray-light bg-white px-5">
+            {projects.map((p) => (
+              <li key={p.id} className="flex items-center justify-between gap-3 border-b border-veridan-warm-gray-light py-3 last:border-b-0">
+                <Link
+                  href={`/admin/projects/${p.id}`}
+                  className="text-sm font-medium text-veridan-accent underline underline-offset-2 hover:text-veridan-accent-soft"
+                >
+                  {p.name}
+                </Link>
+                <span className="text-xs text-veridan-warm-gray">
+                  {p.project_type === "retrofit" ? "Retrofit" : "New construction"} · {p.status}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="rounded-md border border-veridan-warm-gray-light bg-white px-5 py-5">
+          <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-veridan-warm-gray">
+            Start a retrofit quote
+          </h3>
+          <p className="mb-4 text-xs text-veridan-warm-gray">
+            For a retrofit/simple job that doesn&apos;t warrant a full new-construction project. Full
+            Door Register quotes are created from a project&apos;s page.
+          </p>
+          <CompanyQuoteForm companyId={company.id} companyName={company.name} />
+        </div>
       </section>
     </div>
   );

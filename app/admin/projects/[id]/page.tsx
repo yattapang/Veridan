@@ -16,6 +16,7 @@ import { AddHardwareSetForm } from "./AddHardwareSetForm";
 import { CloneSetForm, type CloneableSetOption } from "./CloneSetForm";
 import { HardwareSetCard } from "./HardwareSetCard";
 import { CreateQuoteButton } from "./CreateQuoteButton";
+import { CreateLineItemQuoteButton } from "./CreateLineItemQuoteButton";
 import { QUOTE_STATUS_LABELS, QUOTE_STATUS_BADGE, formatUsd, formatJmd } from "@/lib/quotes/format";
 
 export async function generateMetadata({
@@ -223,19 +224,23 @@ export default async function ProjectDetailPage({
               Quotes
             </h2>
             <p className="mt-1 text-xs text-veridan-warm-gray">
-              Door Register mode: snapshots parameters + FX, materializes line items from
-              the doors&apos; hardware sets, and groups suppliers into shipment origins.
+              Door Register mode materializes line items from the doors&apos; hardware sets.
+              Line-item mode (retrofit/simple jobs) starts empty — add product or ad-hoc lines
+              directly on the quote. Both snapshot parameters + FX and share the same engine.
             </p>
           </div>
-          <CreateQuoteButton
-            projectId={project.id}
-            disabled={assignedDoorCount === 0}
-            disabledReason={
-              assignedDoorCount === 0
-                ? "Add doors and assign hardware sets in the Door Register first."
-                : undefined
-            }
-          />
+          <div className="flex shrink-0 flex-col items-end gap-2">
+            <CreateQuoteButton
+              projectId={project.id}
+              disabled={assignedDoorCount === 0}
+              disabledReason={
+                assignedDoorCount === 0
+                  ? "Add doors and assign hardware sets in the Door Register first."
+                  : undefined
+              }
+            />
+            <CreateLineItemQuoteButton projectId={project.id} />
+          </div>
         </div>
 
         {quotes.length === 0 ? (
@@ -255,6 +260,9 @@ export default async function ProjectDetailPage({
                     className={`rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${QUOTE_STATUS_BADGE[quote.status]}`}
                   >
                     {QUOTE_STATUS_LABELS[quote.status]}
+                  </span>
+                  <span className="text-[10px] uppercase tracking-wide text-veridan-warm-gray">
+                    {quote.quote_mode === "line_item" ? "Line item" : "Door Register"}
                   </span>
                   {quote.revision_number > 1 && (
                     <span className="text-xs text-veridan-warm-gray">rev {quote.revision_number}</span>

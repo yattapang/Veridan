@@ -12,11 +12,20 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { QuoteCalculationResult } from "@/lib/landed-cost/types";
 import { roundHalfUp } from "@/lib/landed-cost/engine";
 import type {
+  ParametersSnapshotStored,
   QuoteLineItemRow,
   QuoteOriginRow,
   QuoteRow,
 } from "@/lib/supabase/types";
-import { computeQuoteResult, type QuoteState } from "./mapping";
+import {
+  buildOriginGroups,
+  computeQuoteResult,
+  planOriginRegroup,
+  supplierOriginKey,
+  supplierOriginLabelMap,
+  type SupplierOriginFields,
+  type QuoteState,
+} from "./mapping";
 
 // A loosely-typed client is fine here — this repo has no generated DB types
 // yet (see lib/supabase/types.ts header), matching the pattern used across
@@ -112,6 +121,155 @@ export async function persistComputed(
 
   if (totalsError) {
     return { error: `Could not persist quote totals: ${totalsError.message}` };
+  }
+
+  return { error: null };
+}
+
+/**
+ * Finds (or creates) the quote_origins row for a single supplier's origin
+ * label on a quote (Task 17). Used when adding a brand-new line_item-mode
+ * line: quote_line_items.quote_origin_id is NOT NULL, so a line can't be
+ * inserted before it has somewhere to land. This resolves just that one
+ * origin; the caller should still follow up with regroupLineItemOrigins
+ * (idempotent) so the pools stay fully consistent across concurrent edits.
+ */
+export async function ensureOriginForSupplier(
+  supabase: Client,
+  quoteId: string,
+  supplier: SupplierOriginFields,
+  parametersSnapshot: ParametersSnapshotStored,
+): Promise<{ originId: string | null; error: string | null }> {
+  const label = supplierOriginKey(supplier);
+
+  const { data: existing, error: findError } = await supabase
+    .from("quote_origins")
+    .select("id")
+    .eq("quote_id", quoteId)
+    .eq("origin_label", label)
+    .maybeSingle();
+  if (findError) return { originId: null, error: findError.message };
+  if (existing) return { originId: existing.id as string, error: null };
+
+  const { data: inserted, error: insertError } = await supabase
+    .from("quote_origins")
+    .insert({
+      quote_id: quoteId,
+      origin_label: label,
+      freight_export_fees_usd: 0,
+      ocean_freight_usd: null,
+      marine_insurance_usd: null,
+      port_handling_usd: parametersSnapshot.port_handling_usd,
+      brokerage_usd: null,
+      pallet_count: 1,
+      duty_gct_pct: parametersSnapshot.duty_gct_pct,
+    })
+    .select("id")
+    .single();
+  if (insertError || !inserted) {
+    return { originId: null, error: insertError?.message ?? "Could not create a shipment origin." };
+  }
+  return { originId: inserted.id as string, error: null };
+}
+
+/**
+ * Re-derives a line_item-mode quote's origin pools from whichever suppliers
+ * its CURRENT lines actually use (Task 17). door_register mode never needs
+ * this — its origins are fixed once at quote-materialization time — but
+ * line_item-mode lines are added/edited/removed one at a time directly on
+ * the draft, so the origin pools must be reconciled after every change:
+ *   1. Group the quote's current lines' suppliers into origin labels, using
+ *      the SAME buildOriginGroups logic Task 16 uses for door_register.
+ *   2. Create any label that doesn't have a quote_origins row yet (seeded
+ *      from the quote's frozen parameters_snapshot, same defaults as a
+ *      freshly materialized door_register origin).
+ *   3. Point every line's quote_origin_id at the right pool.
+ *   4. Delete any origin whose label is no longer used by any line (safe —
+ *      step 3 already moved every line off it).
+ * Callers should follow this with recomputeQuote to re-run the engine over
+ * the now-consistent origins/lines.
+ */
+export async function regroupLineItemOrigins(
+  supabase: Client,
+  quoteId: string,
+): Promise<{ error: string | null }> {
+  const { data: quote, error: quoteError } = await supabase
+    .from("quotes")
+    .select("id, parameters_snapshot")
+    .eq("id", quoteId)
+    .maybeSingle();
+  if (quoteError) return { error: quoteError.message };
+  if (!quote) return { error: "Quote not found." };
+  const snapshot = quote.parameters_snapshot as ParametersSnapshotStored;
+
+  const { data: lineRows, error: lineError } = await supabase
+    .from("quote_line_items")
+    .select("id, supplier_id")
+    .eq("quote_id", quoteId);
+  if (lineError) return { error: lineError.message };
+  const lines = (lineRows as Array<{ id: string; supplier_id: string | null }>) ?? [];
+
+  const supplierIds = [...new Set(lines.map((l) => l.supplier_id).filter((v): v is string => Boolean(v)))];
+  let suppliers: SupplierOriginFields[] = [];
+  if (supplierIds.length > 0) {
+    const { data: supplierRows, error: supplierError } = await supabase
+      .from("suppliers")
+      .select("id, origin_region, country")
+      .in("id", supplierIds);
+    if (supplierError) return { error: supplierError.message };
+    suppliers = (supplierRows as SupplierOriginFields[]) ?? [];
+  }
+
+  const groups = buildOriginGroups(suppliers);
+  const supplierToLabel = supplierOriginLabelMap(groups);
+
+  const { data: originRows, error: originsError } = await supabase
+    .from("quote_origins")
+    .select("id, origin_label")
+    .eq("quote_id", quoteId);
+  if (originsError) return { error: originsError.message };
+  const existingOrigins = (originRows as Array<{ id: string; origin_label: string }>) ?? [];
+
+  const plan = planOriginRegroup(existingOrigins, groups);
+  const labelToId = new Map(plan.existingIdByLabel);
+
+  if (plan.labelsToCreate.length > 0) {
+    const { data: inserted, error: insertError } = await supabase
+      .from("quote_origins")
+      .insert(
+        plan.labelsToCreate.map((label) => ({
+          quote_id: quoteId,
+          origin_label: label,
+          freight_export_fees_usd: 0,
+          ocean_freight_usd: null,
+          marine_insurance_usd: null,
+          port_handling_usd: snapshot?.port_handling_usd ?? null,
+          brokerage_usd: null,
+          pallet_count: 1,
+          duty_gct_pct: snapshot?.duty_gct_pct ?? null,
+        })),
+      )
+      .select("id, origin_label");
+    if (insertError) return { error: insertError.message };
+    for (const o of (inserted as Array<{ id: string; origin_label: string }>) ?? []) {
+      labelToId.set(o.origin_label, o.id);
+    }
+  }
+
+  const lineUpdates = lines.map((l) => {
+    const label = l.supplier_id ? (supplierToLabel.get(l.supplier_id) ?? "Other") : "Other";
+    const originId = labelToId.get(label);
+    return supabase.from("quote_line_items").update({ quote_origin_id: originId }).eq("id", l.id);
+  });
+  if (lineUpdates.length > 0) {
+    const results = await Promise.all(lineUpdates);
+    const lineErr = results.find((r) => r.error);
+    if (lineErr?.error) return { error: lineErr.error.message };
+  }
+
+  if (plan.originIdsToRemove.length > 0) {
+    const { error: deleteError } = await supabase.from("quote_origins").delete().in("id", plan.originIdsToRemove);
+    if (deleteError) return { error: deleteError.message };
   }
 
   return { error: null };

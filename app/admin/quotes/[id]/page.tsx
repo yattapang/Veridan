@@ -3,9 +3,11 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import type {
   OverrideLogWithUser,
+  ProductWithSupplier,
   QuoteLineItemWithDetails,
   QuoteOriginRow,
   QuoteWithProject,
+  SupplierRow,
 } from "@/lib/supabase/types";
 import type { DoorRollup, LineResult, OriginResult } from "@/lib/landed-cost/types";
 import { InstructiveMessage } from "@/components/admin/InstructiveMessage";
@@ -20,6 +22,20 @@ import {
 import { FxSnapshotPanel } from "./FxSnapshotPanel";
 import { QuoteOriginCard } from "./QuoteOriginCard";
 import { MarginPanel, type MarginLine, type PackagePrice } from "./MarginPanel";
+import { AddQuoteLineForm } from "./AddQuoteLineForm";
+import { QuoteLineRow } from "./QuoteLineRow";
+
+const MODE_LABELS: Record<string, string> = {
+  door_register: "Door Register mode",
+  line_item: "Line-item mode",
+};
+
+const PRODUCT_RESULT_LIMIT = 15;
+
+function firstParam(value: string | string[] | undefined): string {
+  if (Array.isArray(value)) return value[0] ?? "";
+  return value ?? "";
+}
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -38,8 +54,17 @@ function supabaseUnconfigured() {
   );
 }
 
-export default async function QuoteBuilderPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function QuoteBuilderPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
   const { id } = await params;
+  const query = await searchParams;
+  const pq = firstParam(query.pq).trim();
+  const safePq = pq.replace(/[,]/g, " ").trim();
 
   let supabase;
   try {
@@ -67,13 +92,14 @@ export default async function QuoteBuilderPage({ params }: { params: Promise<{ i
   }
   if (!quoteData) notFound();
   const quote = quoteData as unknown as QuoteWithProject;
+  const isLineItemMode = quote.quote_mode === "line_item";
 
-  const [originsResult, linesResult, overridesResult] = await Promise.all([
+  const [originsResult, linesResult, overridesResult, suppliersResult, productsResult] = await Promise.all([
     supabase.from("quote_origins").select("*").eq("quote_id", id).order("origin_label"),
     supabase
       .from("quote_line_items")
       .select(
-        "*, products(id, description, manufacturer, product_ref, unit), doors(id, door_number, floor), hardware_sets(id, code, name)"
+        "*, products(id, description, manufacturer, product_ref, unit), doors(id, door_number, floor), hardware_sets(id, code, name), suppliers(id, name)"
       )
       .eq("quote_id", id)
       .order("sort_order"),
@@ -82,11 +108,27 @@ export default async function QuoteBuilderPage({ params }: { params: Promise<{ i
       .select("*, users(id, email, display_name)")
       .eq("quote_id", id)
       .order("created_at", { ascending: false }),
+    isLineItemMode
+      ? supabase.from("suppliers").select("*").eq("active", true).order("name")
+      : Promise.resolve({ data: [] as SupplierRow[], error: null }),
+    isLineItemMode && safePq
+      ? supabase
+          .from("products")
+          .select("*, suppliers(id, name)")
+          .eq("active", true)
+          .or(
+            `description.ilike.%${safePq}%,catalogue_ref.ilike.%${safePq}%,manufacturer.ilike.%${safePq}%,product_ref.ilike.%${safePq}%`
+          )
+          .order("description")
+          .limit(PRODUCT_RESULT_LIMIT)
+      : Promise.resolve({ data: [] as ProductWithSupplier[], error: null }),
   ]);
 
   const origins = (originsResult.data as QuoteOriginRow[]) ?? [];
   const lines = (linesResult.data as unknown as QuoteLineItemWithDetails[]) ?? [];
   const overrides = (overridesResult.data as unknown as OverrideLogWithUser[]) ?? [];
+  const suppliers = (suppliersResult.data as SupplierRow[]) ?? [];
+  const products = (productsResult.data as unknown as ProductWithSupplier[]) ?? [];
 
   const isDraft = quote.status === "draft";
 
@@ -95,9 +137,11 @@ export default async function QuoteBuilderPage({ params }: { params: Promise<{ i
 
   const originResultById = new Map<string, OriginResult>(result.origins.map((o) => [o.originId, o]));
   const lineDetailById = new Map<string, QuoteLineItemWithDetails>(lines.map((l) => [l.id, l]));
+  const lineResultById = new Map<string, LineResult>(result.lines.map((l) => [l.lineId, l]));
 
   function lineLabel(lr: LineResult): string {
-    return lineDetailById.get(lr.lineId)?.products?.description ?? "Line item";
+    const detail = lineDetailById.get(lr.lineId);
+    return detail?.products?.description ?? detail?.description_override ?? "Line item";
   }
   function doorLabel(lr: LineResult): string {
     const d = lineDetailById.get(lr.lineId)?.doors;
@@ -195,8 +239,9 @@ export default async function QuoteBuilderPage({ params }: { params: Promise<{ i
         ) : (
           "Unknown project"
         )}
-        {quote.projects?.companies && <> · {quote.projects.companies.name}</>} · Door Register mode · quoted{" "}
-        {quote.quote_date} · deposit {formatPct(quote.deposit_pct)} · valid {quote.validity_days} days
+        {quote.projects?.companies && <> · {quote.projects.companies.name}</>} ·{" "}
+        {MODE_LABELS[quote.quote_mode] ?? quote.quote_mode} · quoted {quote.quote_date} · deposit{" "}
+        {formatPct(quote.deposit_pct)} · valid {quote.validity_days} days
       </p>
 
       {!isDraft && (
@@ -252,8 +297,8 @@ export default async function QuoteBuilderPage({ params }: { params: Promise<{ i
         )}
       </section>
 
-      {/* Line breakdown grouped per door */}
-      {result.lines.length > 0 && (
+      {/* Line breakdown grouped per door (door_register mode) */}
+      {!isLineItemMode && result.lines.length > 0 && (
         <section className="mt-8">
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">
             Line breakdown by door
@@ -297,13 +342,93 @@ export default async function QuoteBuilderPage({ params }: { params: Promise<{ i
         </section>
       )}
 
+      {/* Flat line table + add-line form (line_item mode) */}
+      {isLineItemMode && (
+        <section className="mt-8">
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">Lines</h2>
+          {lines.length === 0 ? (
+            <InstructiveMessage
+              title="No lines yet"
+              body="Add product or ad-hoc lines below. Shipment origin pools are created automatically from each line's supplier."
+            />
+          ) : (
+            <div className="mb-4 overflow-x-auto rounded-md border border-veridan-warm-gray-light bg-white">
+              <table className="w-full min-w-[720px] table-auto border-collapse text-left text-sm">
+                <thead>
+                  <tr className="border-b border-veridan-warm-gray-light bg-veridan-warm-gray-pale/60 text-[10px] font-semibold uppercase tracking-wide text-veridan-warm-gray">
+                    <th className="px-4 py-2">Line</th>
+                    <th className="px-4 py-2 text-right">Qty</th>
+                    <th className="px-4 py-2 text-right">Landed USD</th>
+                    <th className="px-4 py-2 text-right">Client USD</th>
+                    <th className="px-4 py-2 text-right">Client JMD</th>
+                    <th className="px-4 py-2" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {lines.map((line) => {
+                    const lr = lineResultById.get(line.id);
+                    return (
+                      <QuoteLineRow
+                        key={line.id}
+                        quoteId={quote.id}
+                        line={line}
+                        suppliers={suppliers}
+                        landedCostUsd={lr?.landedCostUsd ?? line.landed_cost_usd}
+                        clientPriceUsd={lr?.clientPriceUsdRounded ?? null}
+                        clientPriceJmd={lr?.clientPriceJmdRounded ?? null}
+                        isDraft={isDraft}
+                      />
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {isDraft && (
+            <div className="rounded-md border border-veridan-warm-gray-light bg-white px-5 py-5">
+              <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-veridan-warm-gray">Add a line</h3>
+              <form method="get" className="mb-4 flex gap-3">
+                <input
+                  type="text"
+                  name="pq"
+                  defaultValue={pq}
+                  placeholder="Search the Hardware Library: description, catalogue ref, manufacturer, SKU…"
+                  className="w-full rounded-md border border-veridan-warm-gray-light bg-white px-3 py-2 text-sm text-veridan-ink focus:border-veridan-accent focus:outline-none"
+                />
+                <button
+                  type="submit"
+                  className="shrink-0 rounded-md bg-veridan-ink px-4 py-2 text-xs font-medium uppercase tracking-wide text-veridan-paper transition-opacity duration-150 hover:opacity-90"
+                >
+                  Search
+                </button>
+              </form>
+              {pq && products.length === 0 && (
+                <div className="mb-4">
+                  <InstructiveMessage title="No products match" body="Try a different search term, or add the ad-hoc line below." />
+                </div>
+              )}
+              {suppliers.length === 0 ? (
+                <InstructiveMessage title="No active suppliers" body="Add a supplier under /admin/suppliers before adding lines." />
+              ) : (
+                <AddQuoteLineForm quoteId={quote.id} products={products} suppliers={suppliers} />
+              )}
+            </div>
+          )}
+        </section>
+      )}
+
       {/* Margin + totals + override gate */}
       <section className="mt-8 rounded-md border border-veridan-warm-gray-light bg-white px-5 py-5">
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">
           Margin &amp; client pricing
         </h2>
         {result.lines.length === 0 ? (
-          <p className="text-sm text-veridan-warm-gray">Add doors with hardware sets and recreate the quote to price it.</p>
+          <p className="text-sm text-veridan-warm-gray">
+            {isLineItemMode
+              ? "Add lines above to price this quote."
+              : "Add doors with hardware sets and recreate the quote to price it."}
+          </p>
         ) : (
           <MarginPanel
             quoteId={quote.id}

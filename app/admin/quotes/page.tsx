@@ -63,15 +63,16 @@ export default async function QuotesPage() {
     <div className="max-w-5xl">
       <h1 className="text-2xl font-semibold text-veridan-ink">Quotes</h1>
       <p className="mt-2 text-sm text-veridan-warm-gray">
-        Every quote across all projects. Create a new Door Register quote from a project&apos;s
-        page. Totals are the cached values from the last recompute.
+        Every quote across all projects. Create a Door Register quote from a project&apos;s page, or
+        a Line-item quote from a project or company page. Totals are the cached values from the
+        last recompute.
       </p>
 
       <section className="mt-8">
         {quotes.length === 0 ? (
           <InstructiveMessage
             title="No quotes yet"
-            body="Open a project with doors and hardware sets assigned, then use 'Create quote (Door Register mode)'."
+            body="For new construction: open a project with doors and hardware sets assigned, then use 'Create quote (Door Register mode)'. For a retrofit/simple job: use 'Create quote (Line-item mode)' from a project or company page."
           />
         ) : (
           <div className="overflow-x-auto rounded-md border border-veridan-warm-gray-light bg-white">

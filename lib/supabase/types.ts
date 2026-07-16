@@ -373,13 +373,23 @@ export interface QuoteOriginRow {
   updated_at: string;
 }
 
-/** §1.9 Quote Line Items */
+/**
+ * §1.9 Quote Line Items. `product_id` and `supplier_id` are additive beyond
+ * the build plan's §1.9 table — see
+ * supabase/migrations/20260716000001_line_item_quote_lines.sql (Task 17).
+ * `product_id` is nullable so line_item-mode quotes can carry free-text
+ * ad-hoc lines (no Hardware Library entry); `supplier_id` is populated for
+ * every line_item-mode line (library-picked or ad-hoc) and drives origin-pool
+ * regrouping. Both are null for door_register-mode lines (product_id is
+ * always set there; origin is fixed at materialization time, not per-line).
+ */
 export interface QuoteLineItemRow {
   id: string;
   quote_id: string;
   door_id: string | null;
   hardware_set_id: string | null;
-  product_id: string;
+  product_id: string | null;
+  supplier_id: string | null;
   quote_origin_id: string;
   description_override: string | null;
   qty: number;
@@ -395,7 +405,7 @@ export interface QuoteLineItemRow {
   updated_at: string;
 }
 
-/** Line item joined with product/door/hardware-set for the builder grid. */
+/** Line item joined with product/door/hardware-set/supplier for the builder grid. */
 export interface QuoteLineItemWithDetails extends QuoteLineItemRow {
   products: {
     id: string;
@@ -406,6 +416,7 @@ export interface QuoteLineItemWithDetails extends QuoteLineItemRow {
   } | null;
   doors: { id: string; door_number: string; floor: string | null } | null;
   hardware_sets: { id: string; code: string; name: string | null } | null;
+  suppliers: { id: string; name: string } | null;
 }
 
 /** §1.16 Override Log */

@@ -1,13 +1,23 @@
 /**
- * Quote mapping-layer unit tests (Task 16).
+ * Quote mapping-layer unit tests (Task 16, extended in Task 17).
  *
- * Covers the three things the brief calls out for the pure DB-rows→engine
- * mapping:
+ * Covers the three things the Task 16 brief calls out for the pure
+ * DB-rows→engine mapping:
  *   1. Quote ref generation (VQ-YYYY-NNN sequence).
  *   2. Origin grouping — a mixed-supplier door set spanning two origins
  *      collapses to two pools, and lines route to the right pool.
  *   3. Snapshot immutability — editing business parameters AFTER a quote's
  *      snapshot is taken must not change that quote's engine numbers.
+ *
+ * Task 17 (line_item mode, retrofit/simple jobs) adds:
+ *   4. line_item-mode mapping with ad-hoc lines (product_id null,
+ *      description_override carries the text, no door/hardware-set).
+ *   5. Mixed library + ad-hoc lines across 2 origins, in line_item mode.
+ *   6. door_register behavior is unchanged (per-door rollups still appear;
+ *      a door_register-mode calculation with the same shape of inputs as
+ *      before Task 17's schema relaxation produces identical numbers).
+ *   7. planOriginRegroup — the pure diff behind line_item mode's
+ *      add/edit/remove-a-line origin regrouping.
  */
 
 import { describe, expect, it } from "vitest";
@@ -26,6 +36,7 @@ import {
   buildOriginGroups,
   buildQuoteCalculationInput,
   nextQuoteRef,
+  planOriginRegroup,
   supplierOriginKey,
   supplierOriginLabelMap,
 } from "./mapping";
@@ -229,5 +240,213 @@ describe("snapshot immutability", () => {
     expect(fx.fx_buffer_pct).toBe(3);
     expect(fx.effective_rate).toBeCloseTo(166.86, 10);
     expect(fx.supplier_rates.GBP).toBe(1.27);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// (4)-(6) Task 17 — line_item mode mapping (ad-hoc lines, mixed origins,
+// door_register left unchanged)
+// ---------------------------------------------------------------------------
+
+describe("line_item mode mapping (Task 17)", () => {
+  const snapshot = buildParametersSnapshot(seedParams());
+  const fx = buildFxSnapshot(seedParams(), "2026-07-15");
+
+  function origin(id: string, label: string): QuoteOriginRow {
+    return {
+      id,
+      quote_id: "Q1",
+      origin_label: label,
+      supplier_invoice_total: null,
+      freight_export_fees_usd: 0,
+      ocean_freight_usd: 600,
+      marine_insurance_usd: null,
+      port_handling_usd: null,
+      brokerage_usd: null,
+      pallet_count: 1,
+      duty_gct_pct: null,
+      cif_basis_usd: null,
+      total_shipment_cost_usd: null,
+      created_at: "",
+      updated_at: "",
+    };
+  }
+
+  /** A line_item-mode line row: no door/hardware-set, optionally no product. */
+  function line(args: {
+    id: string;
+    originId: string;
+    productId: string | null;
+    description?: string | null;
+    unitCost?: number;
+    supplierId?: string | null;
+  }): QuoteLineItemRow {
+    return {
+      id: args.id,
+      quote_id: "Q1",
+      door_id: null,
+      hardware_set_id: null,
+      product_id: args.productId,
+      supplier_id: args.supplierId ?? null,
+      quote_origin_id: args.originId,
+      description_override: args.description ?? null,
+      qty: 1,
+      unit_cost: args.unitCost ?? 500,
+      cost_currency: "USD",
+      unit_cost_usd: args.unitCost ?? 500,
+      line_value_usd: args.unitCost ?? 500,
+      allocated_shipment_cost_usd: null,
+      landed_cost_usd: args.unitCost ?? 500,
+      margin_pct_override: null,
+      sort_order: 0,
+      created_at: "",
+      updated_at: "",
+    };
+  }
+
+  it("prices an ad-hoc line (no product FK, no door) exactly like a library line", () => {
+    const o1 = origin("O1", "UK–Consort");
+    const adHoc = line({
+      id: "L1",
+      originId: "O1",
+      productId: null,
+      description: "Custom bracket — site measured",
+      supplierId: "s-consort",
+    });
+
+    const input = buildQuoteCalculationInput({
+      mode: "line_item",
+      quoteMarginPct: 30,
+      parametersSnapshot: snapshot,
+      fxSnapshot: fx,
+      origins: [o1],
+      lines: [adHoc],
+    });
+    const result = calculateQuote(input);
+
+    expect(result.errors).toEqual([]);
+    expect(result.lines).toHaveLength(1);
+    const lr = result.lines[0];
+    expect(lr.productId).toBeNull();
+    expect(lr.doorId).toBeNull();
+    expect(lr.hardwareSetId).toBeNull();
+    expect(lr.landedCostUsd).toBeGreaterThan(lr.lineValueUsd); // shipment cost got allocated
+    // line_item mode never produces door rollups, even with zero doors involved.
+    expect(result.doors).toEqual([]);
+  });
+
+  it("mixes library-picked and ad-hoc lines across two origins in one quote", () => {
+    const o1 = origin("O1", "UK–Consort");
+    const o2 = origin("O2", "USA–Miami");
+    const libraryLine = line({ id: "L1", originId: "O1", productId: "P1", supplierId: "s-consort", unitCost: 900 });
+    const adHocLine = line({
+      id: "L2",
+      originId: "O2",
+      productId: null,
+      description: "Site-fabricated threshold",
+      supplierId: "s-miami",
+      unitCost: 300,
+    });
+
+    const input = buildQuoteCalculationInput({
+      mode: "line_item",
+      quoteMarginPct: 30,
+      parametersSnapshot: snapshot,
+      fxSnapshot: fx,
+      origins: [o1, o2],
+      lines: [libraryLine, adHocLine],
+    });
+    const result = calculateQuote(input);
+
+    expect(result.errors).toEqual([]);
+    expect(result.origins).toHaveLength(2);
+    const o1Result = result.origins.find((o) => o.originId === "O1")!;
+    const o2Result = result.origins.find((o) => o.originId === "O2")!;
+    expect(o1Result.supplierInvoiceTotalUsd).toBe(900);
+    expect(o2Result.supplierInvoiceTotalUsd).toBe(300);
+
+    // line_item-mode totals are the sum of ROUNDED per-line client prices,
+    // never a door rollup (there are no doors in this mode) — §3.3.
+    const expectedJmd = result.lines.reduce((s, l) => s + l.clientPriceJmdRounded, 0);
+    expect(result.totals.clientPriceJmd).toBeCloseTo(expectedJmd, 2);
+    expect(result.doors).toEqual([]);
+  });
+
+  it("leaves door_register behavior unchanged — per-door rollups still appear", () => {
+    const o1 = origin("O1", "UK–Consort");
+    const doorLine: QuoteLineItemRow = {
+      ...line({ id: "L1", originId: "O1", productId: "P1", unitCost: 4500 }),
+      door_id: "D1",
+      hardware_set_id: "HW01",
+    };
+
+    const input = buildQuoteCalculationInput({
+      mode: "door_register",
+      quoteMarginPct: 30,
+      parametersSnapshot: snapshot,
+      fxSnapshot: fx,
+      origins: [o1],
+      lines: [doorLine],
+    });
+    const result = calculateQuote(input);
+
+    expect(result.doors).toHaveLength(1);
+    expect(result.doors[0].doorId).toBe("D1");
+    expect(result.doors[0].hardwareSetId).toBe("HW01");
+    // Door rollup's JMD is whole-dollar rounded, and it's what totals.clientPriceJmd sums from.
+    expect(Number.isInteger(result.doors[0].clientPriceJmd)).toBe(true);
+    expect(result.totals.clientPriceJmd).toBe(result.doors[0].clientPriceJmd);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// (7) planOriginRegroup — pure diff behind line_item mode's per-line
+// add/edit/remove origin regrouping (lib/quotes/persist.ts
+// regroupLineItemOrigins)
+// ---------------------------------------------------------------------------
+
+describe("planOriginRegroup", () => {
+  it("creates every label from scratch when there are no existing origins", () => {
+    const groups = buildOriginGroups([
+      { id: "consort", origin_region: "UK–Consort", country: "UK" },
+      { id: "trudoor", origin_region: "USA–Miami", country: "USA" },
+    ]);
+    const plan = planOriginRegroup([], groups);
+    expect(plan.labelsToCreate.sort()).toEqual(["UK–Consort", "USA–Miami"]);
+    expect(plan.originIdsToRemove).toEqual([]);
+    expect(plan.existingIdByLabel.size).toBe(0);
+  });
+
+  it("leaves matching origins alone and only creates what's missing", () => {
+    const groups = buildOriginGroups([
+      { id: "consort", origin_region: "UK–Consort", country: "UK" },
+      { id: "trudoor", origin_region: "USA–Miami", country: "USA" },
+    ]);
+    const existing = [{ id: "orig-uk", origin_label: "UK–Consort" }];
+    const plan = planOriginRegroup(existing, groups);
+    expect(plan.labelsToCreate).toEqual(["USA–Miami"]);
+    expect(plan.originIdsToRemove).toEqual([]);
+    expect(plan.existingIdByLabel.get("UK–Consort")).toBe("orig-uk");
+  });
+
+  it("marks an origin for removal once no current line's supplier needs it", () => {
+    // Quote used to have a UK line (now removed) and still has a USA line.
+    const groups = buildOriginGroups([{ id: "trudoor", origin_region: "USA–Miami", country: "USA" }]);
+    const existing = [
+      { id: "orig-uk", origin_label: "UK–Consort" },
+      { id: "orig-usa", origin_label: "USA–Miami" },
+    ];
+    const plan = planOriginRegroup(existing, groups);
+    expect(plan.labelsToCreate).toEqual([]);
+    expect(plan.originIdsToRemove).toEqual(["orig-uk"]);
+    expect(plan.existingIdByLabel.get("USA–Miami")).toBe("orig-usa");
+  });
+
+  it("is a no-op when existing origins already match exactly", () => {
+    const groups = buildOriginGroups([{ id: "consort", origin_region: "UK–Consort", country: "UK" }]);
+    const existing = [{ id: "orig-uk", origin_label: "UK–Consort" }];
+    const plan = planOriginRegroup(existing, groups);
+    expect(plan.labelsToCreate).toEqual([]);
+    expect(plan.originIdsToRemove).toEqual([]);
   });
 });
