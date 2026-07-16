@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
+import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { syncUserRecord } from "@/lib/auth";
 
@@ -54,10 +55,20 @@ function LoginForm() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
       <div className="w-full max-w-sm rounded-lg border border-gray-200 bg-white p-8 shadow-sm">
-        <h1 className="mb-1 text-xl font-semibold text-gray-900">
+        <Image
+          src="/brand/logo-mark-ink.png"
+          alt="Veridan Limited"
+          width={29}
+          height={32}
+          className="mx-auto mb-4"
+          style={{ height: 32, width: "auto" }}
+        />
+        <h1 className="mb-1 text-center text-xl font-semibold text-gray-900">
           Veridan Admin
         </h1>
-        <p className="mb-6 text-sm text-gray-500">Sign in to continue</p>
+        <p className="mb-6 text-center text-sm text-gray-500">
+          Sign in to continue
+        </p>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label

@@ -15,7 +15,7 @@ export function SiteHeader() {
   return (
     <header className="sticky top-0 z-50 border-b border-veridan-line/10 bg-veridan-paper/95 backdrop-blur supports-backdrop-blur:bg-veridan-paper/80">
       <Container className="flex h-20 items-center justify-between">
-        <Wordmark />
+        <Wordmark preload />
 
         <nav className="hidden items-center gap-8 lg:flex">
           {navLinks.map((link) => {

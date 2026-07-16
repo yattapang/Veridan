@@ -11,10 +11,10 @@
  *     (never re-derived from unrounded totals) per Build Plan §3.3.
  *   - Lead-time estimates are per-origin, sourced from the quote's OWN frozen
  *     parameters_snapshot (never live business_parameters).
- *   - Branding: VERIDAN wordmark placeholder, structured the same way as
- *     components/Wordmark.tsx — a real logo image can replace the <Text>
- *     wordmark in ONE place (the Header component below) once brand assets
- *     arrive (PRD §13 item 1).
+ *   - Branding: the Header component below renders the real founder-supplied
+ *     logo mark (public/brand/logo-mark-ink.png — ink variant, since this is
+ *     a light/paper document) beside the "VERIDAN LIMITED" text, matching
+ *     the same principle as components/Wordmark.tsx (PRD §13 item 1).
  *
  * React-PDF does not read Tailwind/globals.css — styles are a self-contained
  * StyleSheet below, with brand hex values copied from app/globals.css'
@@ -22,7 +22,9 @@
  * matches the site's "near-black ink, warm paper, brass accent" feel.
  */
 
-import { Document, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
+import fs from "fs";
+import path from "path";
+import { Document, Image, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
 import {
   formatCount,
   formatDoorNumbers,
@@ -40,6 +42,15 @@ const WARM_GRAY_LIGHT = "#d9d5cc";
 const WARM_GRAY_PALE = "#f3f1ec";
 const PAPER = "#faf9f6";
 const ACCENT = "#a9895c";
+
+// Read the ink-variant mark into a buffer at module load. react-pdf's
+// <Image> resolves local `src` strings via Node's `url.parse`, which
+// misreads a Windows absolute path (e.g. "C:\...") as having a "c:"
+// protocol and falls through to `fetch()` — silently dropping the image.
+// Passing `{ data, format }` sidesteps path/URL resolution entirely and
+// works the same on Windows dev machines and Linux production hosts.
+const LOGO_MARK_PATH = path.join(process.cwd(), "public", "brand", "logo-mark-ink.png");
+const LOGO_MARK_SRC = { data: fs.readFileSync(LOGO_MARK_PATH), format: "png" as const };
 
 export interface QuotePdfDoorGroupRow {
   setCode: string;
@@ -110,6 +121,15 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "flex-start",
     marginBottom: 28,
+  },
+  logoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  logoMark: {
+    width: 20,
+    height: 22,
+    marginRight: 8,
   },
   wordmark: {
     fontSize: 20,
@@ -297,10 +317,14 @@ const styles = StyleSheet.create({
 });
 
 function Header({ wordmark }: { wordmark: string }) {
-  // Single place the logo renders — swap this <Text> for an <Image
-  // src="..." /> once founder-supplied brand assets (PRD §13 item 1)
-  // arrive, matching the same principle as components/Wordmark.tsx.
-  return <Text style={styles.wordmark}>{wordmark}</Text>;
+  return (
+    <View style={styles.logoRow}>
+      {/* eslint-disable-next-line jsx-a11y/alt-text -- react-pdf's <Image>
+          is not an HTML <img>; it has no alt prop. */}
+      <Image src={LOGO_MARK_SRC} style={styles.logoMark} />
+      <Text style={styles.wordmark}>{wordmark}</Text>
+    </View>
+  );
 }
 
 function DoorGroupTable({ rows }: { rows: QuotePdfDoorGroupRow[] }) {

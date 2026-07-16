@@ -10,7 +10,7 @@ export function SiteFooter() {
     <footer className="border-t border-veridan-paper/10 bg-veridan-ink text-veridan-paper">
       <Container className="grid gap-10 py-16 sm:grid-cols-2 lg:grid-cols-4">
         <div className="flex flex-col gap-4 lg:col-span-2">
-          <Wordmark dark />
+          <Wordmark dark size={44} />
           <p className="max-w-sm text-sm leading-relaxed text-veridan-paper/70">
             {siteMeta.positioning}. {siteMeta.tagline}
           </p>
