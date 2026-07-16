@@ -8,6 +8,7 @@ import {
   formatJmd,
   formatUsd,
 } from "@/lib/quotes/format";
+import { isComputedExpired } from "@/lib/quotes/workflow";
 
 export const metadata = {
   title: "Quotes",
@@ -108,6 +109,11 @@ export default async function QuotesPage() {
                       >
                         {QUOTE_STATUS_LABELS[quote.status]}
                       </span>
+                      {isComputedExpired(quote.status, quote.quote_date, quote.validity_days) && (
+                        <span className="ml-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700">
+                          Past valid-until
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-sm text-veridan-warm-gray">
                       {MODE_LABELS[quote.quote_mode] ?? quote.quote_mode}

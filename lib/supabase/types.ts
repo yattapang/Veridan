@@ -341,6 +341,12 @@ export interface QuoteRow {
   declined_at: string | null;
   pdf_storage_path: string | null;
   created_by: string | null;
+  /** Task 19 additive column — see supabase/migrations/20260716000002_quote_workflow.sql. */
+  approved_by: string | null;
+  /** Task 19 additive column. */
+  approved_at: string | null;
+  /** Task 19 additive column — recipient address the quote was actually emailed to. */
+  sent_to: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -40,3 +40,48 @@ export function fileNameFromPath(path: string): string {
   // timestamp prefix for a friendlier label.
   return last.replace(/^\d+-/, "");
 }
+
+/**
+ * Uploads the immutable "sent" PDF artifact to the private `quote-pdfs`
+ * bucket (Task 19 send flow, §1.7 pdf_storage_path). Path convention:
+ * `<quote_ref>/<revision_number>.pdf` — one immutable object per version,
+ * so re-sending the SAME version overwrites its own artifact (upsert) but a
+ * later revision (different quote row, different revision_number) never
+ * touches an earlier version's file. Founders are `authenticated`, which has
+ * full CRUD on this bucket per supabase/migrations/20260713000002_rls.sql.
+ */
+export async function uploadQuotePdf(
+  supabase: SupabaseClient,
+  quoteRef: string,
+  revisionNumber: number,
+  buffer: Buffer
+): Promise<{ path: string | null; error: string | null }> {
+  const path = `${quoteRef}/${revisionNumber}.pdf`;
+  const { error } = await supabase.storage.from("quote-pdfs").upload(path, buffer, {
+    contentType: "application/pdf",
+    upsert: true,
+  });
+  if (error) return { path: null, error: error.message };
+  return { path, error: null };
+}
+
+/**
+ * Signs a URL for a previously uploaded sent-quote PDF artifact, for the
+ * quote detail page's "sent-artifact download link… alongside the live PDF
+ * link" (Task 19). Best-effort, same pattern as signEnquiryFileUrls — a
+ * failure to sign yields `null` rather than failing the page render.
+ */
+export async function signQuotePdfUrl(
+  supabase: SupabaseClient,
+  path: string | null | undefined,
+  expiresInSeconds = 60 * 60
+): Promise<string | null> {
+  if (!path) return null;
+  try {
+    const { data, error } = await supabase.storage.from("quote-pdfs").createSignedUrl(path, expiresInSeconds);
+    if (error || !data) return null;
+    return data.signedUrl;
+  } catch {
+    return null;
+  }
+}

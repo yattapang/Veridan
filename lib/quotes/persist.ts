@@ -12,6 +12,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { QuoteCalculationResult } from "@/lib/landed-cost/types";
 import { roundHalfUp } from "@/lib/landed-cost/engine";
 import type {
+  ContactRow,
   ParametersSnapshotStored,
   QuoteLineItemRow,
   QuoteOriginRow,
@@ -62,6 +63,32 @@ export async function loadQuoteState(
     },
     error: null,
   };
+}
+
+/**
+ * Looks up a company's first contact (primary preferred) so the Task 19 send
+ * form can prefill a recipient — the founder can still pick/enter a
+ * different address. Kept here (a plain data-loading module) rather than in
+ * app/admin/quotes/[id]/workflowActions.ts, which is a "use server" actions
+ * file also imported by a client component (WorkflowPanel) — every export of
+ * such a file must be an async server action with a client-safe signature,
+ * and this helper's Supabase-client argument doesn't fit that shape.
+ */
+export async function loadDefaultRecipientEmail(
+  supabase: Client,
+  companyId: string | null | undefined,
+): Promise<string | null> {
+  if (!companyId) return null;
+  const { data, error } = await supabase
+    .from("contacts")
+    .select("email")
+    .eq("company_id", companyId)
+    .order("is_primary", { ascending: false })
+    .order("created_at", { ascending: true })
+    .limit(1);
+  if (error) return null;
+  const rows = (data as Array<Pick<ContactRow, "email">>) ?? [];
+  return rows[0]?.email ?? null;
 }
 
 /**

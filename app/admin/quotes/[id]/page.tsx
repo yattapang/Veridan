@@ -24,6 +24,11 @@ import { QuoteOriginCard } from "./QuoteOriginCard";
 import { MarginPanel, type MarginLine, type PackagePrice } from "./MarginPanel";
 import { AddQuoteLineForm } from "./AddQuoteLineForm";
 import { QuoteLineRow } from "./QuoteLineRow";
+import { StatusTimeline } from "./StatusTimeline";
+import { WorkflowPanel } from "./WorkflowPanel";
+import { loadDefaultRecipientEmail } from "@/lib/quotes/persist";
+import { isComputedExpired } from "@/lib/quotes/workflow";
+import { signQuotePdfUrl } from "@/lib/storage";
 
 const MODE_LABELS: Record<string, string> = {
   door_register: "Door Register mode",
@@ -131,6 +136,26 @@ export default async function QuoteBuilderPage({
   const products = (productsResult.data as unknown as ProductWithSupplier[]) ?? [];
 
   const isDraft = quote.status === "draft";
+  const expiredComputed = isComputedExpired(quote.status, quote.quote_date, quote.validity_days);
+
+  // Workflow extras: default send recipient, sent-artifact link, sibling revisions.
+  const companyId = quote.projects?.companies?.id ?? null;
+  const [defaultRecipientEmail, sentPdfUrl, prevRevisionResult, nextRevisionResult] = await Promise.all([
+    quote.status === "approved" ? loadDefaultRecipientEmail(supabase, companyId) : Promise.resolve(null),
+    signQuotePdfUrl(supabase, quote.pdf_storage_path),
+    quote.parent_quote_id
+      ? supabase.from("quotes").select("id, quote_ref, revision_number").eq("id", quote.parent_quote_id).maybeSingle()
+      : Promise.resolve({ data: null as { id: string; quote_ref: string; revision_number: number } | null, error: null }),
+    supabase
+      .from("quotes")
+      .select("id, quote_ref, revision_number")
+      .eq("parent_quote_id", quote.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+  const prevRevision = prevRevisionResult.data as { id: string; quote_ref: string; revision_number: number } | null;
+  const nextRevision = nextRevisionResult.data as { id: string; quote_ref: string; revision_number: number } | null;
 
   // Run the engine over the quote's own frozen snapshots for live display.
   const result = computeQuoteResult({ quote, origins, lines });
@@ -230,6 +255,11 @@ export default async function QuoteBuilderPage({
         {quote.revision_number > 1 && (
           <span className="text-xs text-veridan-warm-gray">revision {quote.revision_number}</span>
         )}
+        {expiredComputed && (
+          <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700">
+            Past valid-until
+          </span>
+        )}
         <a
           href={`/api/quotes/${quote.id}/pdf`}
           target="_blank"
@@ -238,7 +268,43 @@ export default async function QuoteBuilderPage({
         >
           Download PDF
         </a>
+        {sentPdfUrl && (
+          <a
+            href={sentPdfUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-md border border-veridan-warm-gray-light bg-white px-4 py-2 text-xs font-medium uppercase tracking-wide text-veridan-ink transition-opacity duration-150 hover:opacity-80"
+          >
+            Sent artifact (v{quote.revision_number})
+          </a>
+        )}
       </div>
+
+      {(prevRevision || nextRevision) && (
+        <p className="mt-2 flex flex-wrap gap-3 text-xs text-veridan-warm-gray">
+          {prevRevision && (
+            <Link
+              href={`/admin/quotes/${prevRevision.id}`}
+              className="underline underline-offset-2 hover:text-veridan-ink"
+            >
+              ← Revision {prevRevision.revision_number} ({prevRevision.quote_ref})
+            </Link>
+          )}
+          {nextRevision && (
+            <Link
+              href={`/admin/quotes/${nextRevision.id}`}
+              className="underline underline-offset-2 hover:text-veridan-ink"
+            >
+              Revision {nextRevision.revision_number} ({nextRevision.quote_ref}) →
+            </Link>
+          )}
+        </p>
+      )}
+
+      <div className="mt-4">
+        <StatusTimeline quote={quote} isExpiredComputed={expiredComputed} />
+      </div>
+
       <p className="mt-2 text-sm text-veridan-warm-gray">
         {quote.projects ? (
           <Link href={`/admin/projects/${quote.projects.id}`} className="underline underline-offset-2 hover:text-veridan-ink">
@@ -256,7 +322,7 @@ export default async function QuoteBuilderPage({
         <div className="mt-4">
           <InstructiveMessage
             title="This quote is read-only"
-            body="Only draft quotes can be edited. Create a revision to make changes (revision flow arrives in Task 19)."
+            body="Only draft quotes can be edited. Use “Create revision” in the Workflow section below to make changes as a new version."
           />
         </div>
       )}
@@ -482,22 +548,7 @@ export default async function QuoteBuilderPage({
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">
           Workflow
         </h2>
-        <p className="mb-3 text-xs text-veridan-warm-gray">
-          Approve / send / accept and the revision flow arrive in Task 19. Buttons are disabled here.
-        </p>
-        <div className="flex flex-wrap gap-3">
-          {["Approve", "Send", "Accept", "Create revision"].map((label) => (
-            <button
-              key={label}
-              type="button"
-              disabled
-              title="Available in Task 19"
-              className="cursor-not-allowed rounded-md border border-veridan-warm-gray-light px-4 py-2 text-xs font-medium uppercase tracking-wide text-veridan-warm-gray opacity-60"
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <WorkflowPanel quoteId={quote.id} status={quote.status} defaultRecipientEmail={defaultRecipientEmail} />
       </section>
     </div>
   );

@@ -83,3 +83,71 @@ export async function sendEnquiryNotification(
     return { ok: false, error: message };
   }
 }
+
+export interface QuoteEmailInput {
+  to: string;
+  quoteRef: string;
+  projectName: string;
+  clientCompanyName: string | null;
+  validUntilLabel: string;
+  pdfBuffer: Buffer;
+}
+
+/**
+ * Sends the client-facing quote email with the PDF attached (Task 19 send
+ * flow, §6.4 "Send: emailed from the app via Resend; PDF attached"). Unlike
+ * sendEnquiryNotification, this one does NOT swallow its own failure as a
+ * best-effort side channel — a failed send is the build plan's explicit
+ * "send fails cleanly (status stays approved, error surfaced)" requirement,
+ * so the caller (workflowActions.ts sendQuote) must see the error and must
+ * NOT advance the quote's status or write sent_at/sent_to when this returns
+ * ok: false.
+ */
+export async function sendQuoteEmail(
+  input: QuoteEmailInput
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const resend = getResendClient();
+  if (!resend) {
+    return { ok: false, error: "RESEND_API_KEY is not configured — cannot send this quote." };
+  }
+
+  const clientLine = input.clientCompanyName ? ` for ${input.clientCompanyName}` : "";
+  const text = [
+    `Please find attached quote ${input.quoteRef}${clientLine} — ${input.projectName}.`,
+    "",
+    `This quote is valid until ${input.validUntilLabel}.`,
+    "",
+    "Please reach out with any questions.",
+  ].join("\n");
+
+  try {
+    const { error } = await resend.emails.send({
+      // TODO(founder input needed): swap for a verified @veridanlimited.com
+      // sending address once the Resend sending domain is verified (see
+      // build plan §5 Prerequisites — SPF/DKIM at GoDaddy). Resend's
+      // sandbox "onboarding@resend.dev" only works in development/testing —
+      // the send UI surfaces this as a warning banner until DNS is done.
+      from: "Veridan Limited <onboarding@resend.dev>",
+      to: [input.to],
+      subject: `Veridan quote ${input.quoteRef} — ${input.projectName}`,
+      text,
+      attachments: [
+        {
+          filename: `${input.quoteRef}.pdf`,
+          content: input.pdfBuffer,
+        },
+      ],
+    });
+
+    if (error) {
+      console.error("[email] Resend returned an error sending a quote:", error);
+      return { ok: false, error: error.message };
+    }
+
+    return { ok: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error sending email.";
+    console.error("[email] Failed to send quote email:", err);
+    return { ok: false, error: message };
+  }
+}
