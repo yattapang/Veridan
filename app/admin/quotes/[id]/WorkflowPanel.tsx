@@ -125,8 +125,8 @@ export function WorkflowPanel({
       {status === "approved" && (
         <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-4">
           <p className="mb-3 text-xs text-amber-800">
-            Sending from the Resend sandbox address (<code>onboarding@resend.dev</code>) until the
-            veridanlimited.com domain is DNS-verified for sending.
+            Quote emails send from <code>quotes@veridanlimited.com</code>. Replies go to the
+            same address.
           </p>
           <form action={sendAction} className="flex flex-wrap items-end gap-3">
             <div className="min-w-[260px] flex-1">

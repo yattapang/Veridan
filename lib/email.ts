@@ -60,11 +60,8 @@ export async function sendEnquiryNotification(
 
   try {
     const { error } = await resend.emails.send({
-      // TODO(founder input needed): swap for a verified @veridanlimited.com
-      // sending address once the Resend sending domain is verified (see
-      // build plan §5 Prerequisites — SPF/DKIM at GoDaddy). Resend's
-      // sandbox "onboarding@resend.dev" only works in development/testing.
-      from: "Veridan Website <onboarding@resend.dev>",
+      // Domain verified in Resend 2026-07-16; sender confirmed by founders.
+      from: "Veridan Website <quotes@veridanlimited.com>",
       to: [...enquiryNotificationRecipients],
       replyTo: input.contactEmail,
       subject: `New ${pathwayLabel} enquiry — ${input.companyName || input.contactName}`,
@@ -122,12 +119,9 @@ export async function sendQuoteEmail(
 
   try {
     const { error } = await resend.emails.send({
-      // TODO(founder input needed): swap for a verified @veridanlimited.com
-      // sending address once the Resend sending domain is verified (see
-      // build plan §5 Prerequisites — SPF/DKIM at GoDaddy). Resend's
-      // sandbox "onboarding@resend.dev" only works in development/testing —
-      // the send UI surfaces this as a warning banner until DNS is done.
-      from: "Veridan Limited <onboarding@resend.dev>",
+      // Domain verified in Resend 2026-07-16; sender confirmed by founders.
+      from: "Veridan Limited <quotes@veridanlimited.com>",
+      replyTo: "quotes@veridanlimited.com",
       to: [input.to],
       subject: `Veridan quote ${input.quoteRef} — ${input.projectName}`,
       text,

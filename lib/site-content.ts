@@ -24,10 +24,12 @@ export const siteMeta = {
     "Veridan Limited is Jamaica's premium commercial hardware specialist, supplying architect-specified, internationally certified door hardware and ironmongery to architects, contractors, and building owners across Jamaica.",
 } as const;
 
-// TODO(founder input needed): confirm final public email + WhatsApp Business
-// number/link before launch. Values below are placeholders per PRD §5.1/§5.4.
+// Founder-confirmed 2026-07-16: quotes@ is the public quote/contact address.
+// All @veridanlimited.com addresses are currently aliases to one GoDaddy
+// mailbox; they will be separated into real mailboxes as the team expands.
+// TODO(founder input needed): WhatsApp Business number for a working wa.me link.
 export const contactInfo = {
-  email: "info@veridanlimited.com",
+  email: "quotes@veridanlimited.com",
   whatsappBusinessLabel: "WhatsApp Business",
   // TODO(founder input needed): provide the WhatsApp Business number so this
   // can become a working https://wa.me/<number> link.
@@ -36,15 +38,13 @@ export const contactInfo = {
   location: "Kingston, Jamaica",
 } as const;
 
-// TODO(founder input needed, Task 8): placeholder recipient list for the
-// "new enquiry" notification email (Resend). PRD §5.4 says "notify Ken &
-// Kaylia" but this repo has no confirmed individual founder inboxes — using
-// the shared info@ address for both until real addresses are provided, at
-// which point this should become e.g. ["ken@veridanlimited.com",
-// "kaylia@veridanlimited.com"]. A single shared inbox means both founders
-// see every enquiry today, which satisfies the PRD requirement, just not by
-// the exact mechanism (two named addresses) it describes.
-export const enquiryNotificationRecipients = [contactInfo.email] as const;
+// Founder-confirmed 2026-07-16: enquiry notifications go to kaydean@ (Kay-Dean
+// runs sales; kenyatta@ also exists — add it here if Kenyatta wants direct
+// copies). All aliases currently deliver to one shared mailbox, so both
+// founders see every enquiry today; the split becomes real after expansion.
+export const enquiryNotificationRecipients = [
+  "kaydean@veridanlimited.com",
+] as const;
 
 export const navLinks = [
   { href: "/", label: "Home" },
