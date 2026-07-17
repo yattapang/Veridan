@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import type { ProductWithSupplier, SupplierRow } from "@/lib/supabase/types";
+import type { ItemGroupRow, ProductWithSupplier, SupplierRow } from "@/lib/supabase/types";
 import { setProductActive } from "./actions";
 import { ProductForm } from "./ProductForm";
 
@@ -12,9 +12,11 @@ function formatCost(unitCost: number, currency: string) {
 export function ProductListItem({
   product,
   suppliers,
+  itemGroups,
 }: {
   product: ProductWithSupplier;
   suppliers: SupplierRow[];
+  itemGroups: ItemGroupRow[];
 }) {
   const [editing, setEditing] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -31,7 +33,7 @@ export function ProductListItem({
   if (editing) {
     return (
       <li className="border-b border-veridan-warm-gray-light py-4 last:border-b-0">
-        <ProductForm product={product} suppliers={suppliers} onSaved={() => setEditing(false)} />
+        <ProductForm product={product} suppliers={suppliers} itemGroups={itemGroups} onSaved={() => setEditing(false)} />
         <button
           type="button"
           onClick={() => setEditing(false)}
@@ -64,6 +66,15 @@ export function ProductListItem({
           {formatCost(product.unit_cost, product.cost_currency)} / {product.unit}
           {product.suppliers ? ` · ${product.suppliers.name}` : ""}
         </p>
+        {(product.item_groups || product.finish_code || product.design_series) && (
+          <p className="mt-1 text-xs text-veridan-warm-gray">
+            {product.item_groups
+              ? `${product.item_groups.family_name}${product.item_groups.grade ? ` (${product.item_groups.grade})` : ""}`
+              : ""}
+            {product.finish_code ? ` · finish ${product.finish_code}` : ""}
+            {product.design_series ? ` · ${product.design_series}` : ""}
+          </p>
+        )}
         {error && (
           <p role="alert" className="mt-1 text-xs text-red-600">
             {error}
@@ -72,6 +83,14 @@ export function ProductListItem({
       </div>
 
       <div className="flex shrink-0 items-center gap-3">
+        {product.item_group_id && (
+          <a
+            href={`/admin/products/compare/${product.item_group_id}`}
+            className="text-xs font-medium text-veridan-accent underline underline-offset-2 hover:text-veridan-accent-soft"
+          >
+            Compare offerings
+          </a>
+        )}
         <button
           type="button"
           onClick={() => setEditing(true)}

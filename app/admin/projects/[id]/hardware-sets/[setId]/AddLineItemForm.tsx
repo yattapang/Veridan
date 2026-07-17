@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useRef, useState } from "react";
 import { CURRENCY_CODES, type ProductWithSupplier, type SupplierRow } from "@/lib/supabase/types";
+import { siblingAffordanceText, siblingsInGroup } from "@/lib/item-groups";
 import { addLineItem } from "./actions";
 import { initialLineItemActionResult } from "./actionState";
 
@@ -21,17 +22,21 @@ export function AddLineItemForm({
   setId,
   products,
   suppliers,
+  siblingsByGroup = {},
 }: {
   projectId: string;
   setId: string;
   products: ProductWithSupplier[];
   suppliers: SupplierRow[];
+  /** Products sharing an item_group_id with something in `products`, keyed by item_group_id (Task 32). */
+  siblingsByGroup?: Record<string, ProductWithSupplier[]>;
 }) {
   const [state, formAction, pending] = useActionState(
     addLineItem.bind(null, projectId, setId),
     initialLineItemActionResult
   );
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [showSiblings, setShowSiblings] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
   const wasPending = useRef(false);
 
@@ -39,11 +44,16 @@ export function AddLineItemForm({
     if (wasPending.current && !pending && state.ok) {
       formRef.current?.reset();
       setSelectedId(null);
+      setShowSiblings(false);
     }
     wasPending.current = pending;
   }, [pending, state.ok]);
 
   const selected = products.find((p) => p.id === selectedId) ?? null;
+  const siblings = selected?.item_group_id
+    ? siblingsInGroup(siblingsByGroup[selected.item_group_id] ?? [], selected.item_group_id, selected.id)
+    : [];
+  const siblingText = siblingAffordanceText(siblings.length);
 
   return (
     <div>
@@ -78,6 +88,28 @@ export function AddLineItemForm({
           <p className="text-sm font-medium text-veridan-ink sm:col-span-4">
             Adding: {selected.description}
           </p>
+
+          {siblingText && (
+            <div className="sm:col-span-4">
+              <button
+                type="button"
+                onClick={() => setShowSiblings((v) => !v)}
+                className="text-xs font-medium text-veridan-accent underline underline-offset-2 hover:text-veridan-accent-soft"
+              >
+                {siblingText} {showSiblings ? "(hide)" : "(show)"}
+              </button>
+              {showSiblings && (
+                <ul className="mt-2 rounded-md border border-veridan-warm-gray-light bg-white text-xs">
+                  {siblings.map((s) => (
+                    <li key={s.id} className="border-b border-veridan-warm-gray-light px-3 py-1.5 last:border-b-0">
+                      {s.suppliers?.name ?? "no supplier"} · {s.finish_code ?? "no finish code"} ·{" "}
+                      {s.cost_currency} {s.unit_cost}/{s.unit}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
 
           <div>
             <label className={labelClass} htmlFor="add-supplier">

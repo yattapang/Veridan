@@ -1,10 +1,13 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import {
+  GRADE_VALUES,
   PRODUCT_CATEGORIES,
+  type ItemGroupRow,
   type ProductWithSupplier,
   type SupplierRow,
 } from "@/lib/supabase/types";
+import { hasAnyFilter, parseProductFilterParams } from "@/lib/item-groups";
 import { InstructiveMessage } from "@/components/admin/InstructiveMessage";
 import { ProductForm } from "./ProductForm";
 import { ProductListItem } from "./ProductListItem";
@@ -31,21 +34,14 @@ const CATEGORY_LABELS: Record<string, string> = {
 // this becomes limiting.
 const RESULT_LIMIT = 300;
 
-function firstParam(value: string | string[] | undefined): string {
-  if (Array.isArray(value)) return value[0] ?? "";
-  return value ?? "";
-}
-
 export default async function ProductsPage({
   searchParams,
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const params = await searchParams;
-  const q = firstParam(params.q).trim();
-  const category = firstParam(params.category).trim();
-  const manufacturer = firstParam(params.manufacturer).trim();
-  const supplierId = firstParam(params.supplier_id).trim();
+  const { q, category, manufacturer, supplierId, itemGroupId, grade, financeCode } =
+    parseProductFilterParams(params);
 
   let supabase;
   try {
@@ -72,9 +68,29 @@ export default async function ProductsPage({
     suppliersError = err instanceof Error ? err.message : "Unknown error reaching Supabase.";
   }
 
+  let itemGroups: ItemGroupRow[] = [];
+  let itemGroupsError: string | null = null;
+  try {
+    const { data, error } = await supabase.from("item_groups").select("*").order("family_name");
+    if (error) itemGroupsError = error.message;
+    else itemGroups = (data as ItemGroupRow[]) ?? [];
+  } catch (err) {
+    itemGroupsError = err instanceof Error ? err.message : "Unknown error reaching Supabase.";
+  }
+
+  // Grade lives on item_groups, not products, so filtering by grade means
+  // first resolving which item_groups match, then constraining products to
+  // that set of ids (combinable with an explicit item_group_id filter too —
+  // both just AND together below).
+  let gradeGroupIds: string[] | null = null;
+  if (grade) {
+    const { data } = await supabase.from("item_groups").select("id").eq("grade", grade);
+    gradeGroupIds = (data ?? []).map((r) => r.id as string);
+  }
+
   let query = supabase
     .from("products")
-    .select("*, suppliers(id, name)")
+    .select("*, suppliers(id, name), item_groups(id, family_name, grade)")
     .order("description")
     .limit(RESULT_LIMIT);
 
@@ -91,6 +107,14 @@ export default async function ProductsPage({
   if (category) query = query.eq("generic_category", category);
   if (manufacturer) query = query.ilike("manufacturer", `%${manufacturer.replace(/[,%]/g, " ").trim()}%`);
   if (supplierId) query = query.eq("supplier_id", supplierId);
+  if (financeCode) query = query.eq("finish_code", financeCode);
+  if (itemGroupId) {
+    query = query.eq("item_group_id", itemGroupId);
+  } else if (gradeGroupIds) {
+    // No sentinel-id hack needed — an empty `.in()` list is valid and
+    // simply matches nothing, which is correct when no group has that grade.
+    query = query.in("item_group_id", gradeGroupIds);
+  }
 
   let data: ProductWithSupplier[] | null = null;
   let loadError: string | null = null;
@@ -116,7 +140,7 @@ export default async function ProductsPage({
   }
 
   const products = data ?? [];
-  const hasFilters = Boolean(q || category || manufacturer || supplierId);
+  const hasFilters = hasAnyFilter({ q, category, manufacturer, supplierId, itemGroupId, grade, financeCode });
   const inputClass =
     "w-full rounded-md border border-veridan-warm-gray-light bg-white px-3 py-2 text-sm text-veridan-ink focus:border-veridan-accent focus:outline-none";
 
@@ -137,12 +161,20 @@ export default async function ProductsPage({
           />
         </div>
       )}
+      {itemGroupsError && (
+        <div className="mt-4">
+          <InstructiveMessage
+            title="Item group list unavailable"
+            body={`Couldn't load item groups for the form/filter (${itemGroupsError}). You can still browse products.`}
+          />
+        </div>
+      )}
 
       <section className="mt-8 rounded-md border border-veridan-warm-gray-light bg-white px-5 py-5">
         <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">
           Add a product
         </h2>
-        <ProductForm suppliers={suppliers} />
+        <ProductForm suppliers={suppliers} itemGroups={itemGroups} />
       </section>
 
       <section className="mt-10">
@@ -202,6 +234,46 @@ export default async function ProductsPage({
               className={`${inputClass} mt-1`}
             />
           </div>
+          <div>
+            <label className="block text-xs font-medium uppercase tracking-wide text-veridan-warm-gray" htmlFor="item_group_id">
+              Family (item group)
+            </label>
+            <select id="item_group_id" name="item_group_id" defaultValue={itemGroupId} className={`${inputClass} mt-1`}>
+              <option value="">All families</option>
+              {itemGroups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.family_name}
+                  {g.grade ? ` (${g.grade})` : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium uppercase tracking-wide text-veridan-warm-gray" htmlFor="grade">
+              Grade
+            </label>
+            <select id="grade" name="grade" defaultValue={grade} className={`${inputClass} mt-1`}>
+              <option value="">All grades</option>
+              {GRADE_VALUES.map((g) => (
+                <option key={g} value={g}>
+                  {g}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium uppercase tracking-wide text-veridan-warm-gray" htmlFor="finish_code">
+              Finish code
+            </label>
+            <input
+              id="finish_code"
+              type="text"
+              name="finish_code"
+              defaultValue={financeCode}
+              placeholder="US32D…"
+              className={`${inputClass} mt-1`}
+            />
+          </div>
           <div className="flex items-end gap-3 sm:col-span-4">
             <button
               type="submit"
@@ -243,7 +315,7 @@ export default async function ProductsPage({
         ) : (
           <ul className="rounded-md border border-veridan-warm-gray-light bg-white px-5">
             {products.map((product) => (
-              <ProductListItem key={product.id} product={product} suppliers={suppliers} />
+              <ProductListItem key={product.id} product={product} suppliers={suppliers} itemGroups={itemGroups} />
             ))}
           </ul>
         )}

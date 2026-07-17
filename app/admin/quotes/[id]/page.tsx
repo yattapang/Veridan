@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import type {
+  ItemGroupRow,
   OverrideLogWithUser,
   ProductWithSupplier,
   QuoteLineItemWithDetails,
@@ -9,6 +10,7 @@ import type {
   QuoteWithProject,
   SupplierRow,
 } from "@/lib/supabase/types";
+import { GRADE_VALUES } from "@/lib/supabase/types";
 import type { DoorRollup, LineResult, OriginResult } from "@/lib/landed-cost/types";
 import { InstructiveMessage } from "@/components/admin/InstructiveMessage";
 import { computeQuoteResult } from "@/lib/quotes/mapping";
@@ -70,6 +72,9 @@ export default async function QuoteBuilderPage({
   const query = await searchParams;
   const pq = firstParam(query.pq).trim();
   const safePq = pq.replace(/[,]/g, " ").trim();
+  const pGrade = firstParam(query.grade).trim();
+  const pFinishCode = firstParam(query.finish_code).trim();
+  const pItemGroupId = firstParam(query.item_group_id).trim();
 
   let supabase;
   try {
@@ -101,7 +106,33 @@ export default async function QuoteBuilderPage({
   const quote = quoteData as unknown as QuoteWithProject;
   const isLineItemMode = quote.quote_mode === "line_item";
 
-  const [originsResult, linesResult, overridesResult, suppliersResult, productsResult] = await Promise.all([
+  const hasPickerFilters = Boolean(safePq || pGrade || pFinishCode || pItemGroupId);
+
+  let gradeGroupIds: string[] | null = null;
+  if (isLineItemMode && pGrade) {
+    const { data } = await supabase.from("item_groups").select("id").eq("grade", pGrade);
+    gradeGroupIds = (data ?? []).map((r) => r.id as string);
+  }
+
+  let productsQuery = supabase
+    .from("products")
+    .select("*, suppliers(id, name), item_groups(id, family_name, grade)")
+    .eq("active", true)
+    .order("description")
+    .limit(PRODUCT_RESULT_LIMIT);
+  if (safePq) {
+    productsQuery = productsQuery.or(
+      `description.ilike.%${safePq}%,catalogue_ref.ilike.%${safePq}%,manufacturer.ilike.%${safePq}%,product_ref.ilike.%${safePq}%`
+    );
+  }
+  if (pFinishCode) productsQuery = productsQuery.eq("finish_code", pFinishCode);
+  if (pItemGroupId) {
+    productsQuery = productsQuery.eq("item_group_id", pItemGroupId);
+  } else if (gradeGroupIds) {
+    productsQuery = productsQuery.in("item_group_id", gradeGroupIds);
+  }
+
+  const [originsResult, linesResult, overridesResult, suppliersResult, productsResult, itemGroupsResult] = await Promise.all([
     supabase.from("quote_origins").select("*").eq("quote_id", id).order("origin_label"),
     supabase
       .from("quote_line_items")
@@ -118,17 +149,12 @@ export default async function QuoteBuilderPage({
     isLineItemMode
       ? supabase.from("suppliers").select("*").eq("active", true).order("name")
       : Promise.resolve({ data: [] as SupplierRow[], error: null }),
-    isLineItemMode && safePq
-      ? supabase
-          .from("products")
-          .select("*, suppliers(id, name)")
-          .eq("active", true)
-          .or(
-            `description.ilike.%${safePq}%,catalogue_ref.ilike.%${safePq}%,manufacturer.ilike.%${safePq}%,product_ref.ilike.%${safePq}%`
-          )
-          .order("description")
-          .limit(PRODUCT_RESULT_LIMIT)
+    isLineItemMode && hasPickerFilters
+      ? productsQuery
       : Promise.resolve({ data: [] as ProductWithSupplier[], error: null }),
+    isLineItemMode
+      ? supabase.from("item_groups").select("*").order("family_name")
+      : Promise.resolve({ data: [] as ItemGroupRow[], error: null }),
   ]);
 
   const origins = (originsResult.data as QuoteOriginRow[]) ?? [];
@@ -136,6 +162,21 @@ export default async function QuoteBuilderPage({
   const overrides = (overridesResult.data as unknown as OverrideLogWithUser[]) ?? [];
   const suppliers = (suppliersResult.data as SupplierRow[]) ?? [];
   const products = (productsResult.data as unknown as ProductWithSupplier[]) ?? [];
+  const itemGroups = (itemGroupsResult.data as ItemGroupRow[]) ?? [];
+
+  const resultItemGroupIds = Array.from(new Set(products.map((p) => p.item_group_id).filter((v): v is string => Boolean(v))));
+  const siblingsResult = resultItemGroupIds.length
+    ? await supabase
+        .from("products")
+        .select("*, suppliers(id, name), item_groups(id, family_name, grade)")
+        .in("item_group_id", resultItemGroupIds)
+        .eq("active", true)
+    : { data: [] as ProductWithSupplier[] };
+  const siblingsByGroup: Record<string, ProductWithSupplier[]> = {};
+  for (const p of (siblingsResult.data as unknown as ProductWithSupplier[]) ?? []) {
+    if (!p.item_group_id) continue;
+    (siblingsByGroup[p.item_group_id] ??= []).push(p);
+  }
 
   const isDraft = quote.status === "draft";
   const expiredComputed = isComputedExpired(quote.status, quote.quote_date, quote.validity_days);
@@ -464,12 +505,46 @@ export default async function QuoteBuilderPage({
           {isDraft && (
             <div className="rounded-md border border-veridan-warm-gray-light bg-white px-5 py-5">
               <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-veridan-warm-gray">Add a line</h3>
-              <form method="get" className="mb-4 flex gap-3">
+              <form method="get" className="mb-4 grid gap-3 sm:grid-cols-4">
                 <input
                   type="text"
                   name="pq"
                   defaultValue={pq}
                   placeholder="Search the Hardware Library: description, catalogue ref, manufacturer, SKU…"
+                  className="w-full rounded-md border border-veridan-warm-gray-light bg-white px-3 py-2 text-sm text-veridan-ink focus:border-veridan-accent focus:outline-none sm:col-span-2"
+                />
+                <select
+                  name="item_group_id"
+                  defaultValue={pItemGroupId}
+                  aria-label="Family (item group)"
+                  className="w-full rounded-md border border-veridan-warm-gray-light bg-white px-3 py-2 text-sm text-veridan-ink focus:border-veridan-accent focus:outline-none"
+                >
+                  <option value="">All families</option>
+                  {itemGroups.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.family_name}
+                      {g.grade ? ` (${g.grade})` : ""}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  name="grade"
+                  defaultValue={pGrade}
+                  aria-label="Grade"
+                  className="w-full rounded-md border border-veridan-warm-gray-light bg-white px-3 py-2 text-sm text-veridan-ink focus:border-veridan-accent focus:outline-none"
+                >
+                  <option value="">All grades</option>
+                  {GRADE_VALUES.map((g) => (
+                    <option key={g} value={g}>
+                      {g}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="text"
+                  name="finish_code"
+                  defaultValue={pFinishCode}
+                  placeholder="Finish code (US32D…)"
                   className="w-full rounded-md border border-veridan-warm-gray-light bg-white px-3 py-2 text-sm text-veridan-ink focus:border-veridan-accent focus:outline-none"
                 />
                 <button
@@ -479,15 +554,15 @@ export default async function QuoteBuilderPage({
                   Search
                 </button>
               </form>
-              {pq && products.length === 0 && (
+              {hasPickerFilters && products.length === 0 && (
                 <div className="mb-4">
-                  <InstructiveMessage title="No products match" body="Try a different search term, or add the ad-hoc line below." />
+                  <InstructiveMessage title="No products match" body="Try a different search term or filter, or add the ad-hoc line below." />
                 </div>
               )}
               {suppliers.length === 0 ? (
                 <InstructiveMessage title="No active suppliers" body="Add a supplier under /admin/suppliers before adding lines." />
               ) : (
-                <AddQuoteLineForm quoteId={quote.id} products={products} suppliers={suppliers} />
+                <AddQuoteLineForm quoteId={quote.id} products={products} suppliers={suppliers} siblingsByGroup={siblingsByGroup} />
               )}
             </div>
           )}

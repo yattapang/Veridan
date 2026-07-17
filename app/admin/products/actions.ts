@@ -9,6 +9,10 @@ export type ProductFormResult =
   | { ok: true; error?: undefined }
   | { ok: false; error: string };
 
+export type ItemGroupQuickCreateResult =
+  | { ok: true; id: string; error?: undefined }
+  | { ok: false; error: string };
+
 function isCurrencyCode(value: unknown): value is CurrencyCode {
   return typeof value === "string" && (CURRENCY_CODES as string[]).includes(value);
 }
@@ -54,6 +58,9 @@ function parseProductFields(
   const suppliedFinish = String(formData.get("supplied_finish") ?? "").trim();
   const manufacturer = String(formData.get("manufacturer") ?? "").trim();
   const productRef = String(formData.get("product_ref") ?? "").trim();
+  const itemGroupIdRaw = String(formData.get("item_group_id") ?? "").trim();
+  const financeCode = String(formData.get("finish_code") ?? "").trim();
+  const designSeries = String(formData.get("design_series") ?? "").trim();
 
   return {
     ok: true,
@@ -69,8 +76,49 @@ function parseProductFields(
       unit,
       unit_cost: unitCost,
       cost_currency: costCurrency,
+      item_group_id: itemGroupIdRaw || null,
+      finish_code: financeCode || null,
+      design_series: designSeries || null,
     },
   };
+}
+
+/**
+ * Inline quick-create for a product's item group (Task 31: "item_group
+ * select (with inline quick-create)"). Mirrors item-groups/actions.ts
+ * createItemGroup but returns the new row's id so the calling client
+ * component can select it immediately without a full page reload.
+ */
+export async function createItemGroupInline(
+  familyName: string,
+  grade: string
+): Promise<ItemGroupQuickCreateResult> {
+  let supabase;
+  try {
+    supabase = await createClient();
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Supabase is not configured." };
+  }
+
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "You must be signed in to create an item group." };
+
+  const trimmedName = familyName.trim();
+  if (!trimmedName) return { ok: false, error: "Family name is required." };
+
+  const { data, error } = await supabase
+    .from("item_groups")
+    .insert({ family_name: trimmedName, grade: grade || null })
+    .select("id")
+    .single();
+
+  if (error || !data) {
+    return { ok: false, error: `Could not create item group: ${error?.message ?? "unknown error"}` };
+  }
+
+  revalidatePath("/admin/products");
+  revalidatePath("/admin/item-groups");
+  return { ok: true, id: data.id as string };
 }
 
 export async function createProduct(

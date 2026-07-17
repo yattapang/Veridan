@@ -76,6 +76,13 @@ export const PRODUCT_CATEGORIES: ProductCategory[] = [
   "other",
 ];
 
+/**
+ * §1.4 Phase 2A item_groups grade — ANSI/BHMA valid-value set (§8 FOUNDER
+ * RESOLUTIONS Q2 RESOLVED). Not an internal Veridan quality label.
+ */
+export type GradeValue = "Grade 1" | "Grade 2" | "Grade 3";
+export const GRADE_VALUES: GradeValue[] = ["Grade 1", "Grade 2", "Grade 3"];
+
 export interface ProductRow {
   id: string;
   generic_category: ProductCategory;
@@ -91,6 +98,12 @@ export interface ProductRow {
   cost_currency: CurrencyCode;
   source: "manual" | "price_file_extraction";
   active: boolean;
+  /** Phase 2A additive column (Task 29) — see 20260717000002_item_groups_and_product_variants.sql. */
+  item_group_id: string | null;
+  /** Phase 2A additive column (Task 29). */
+  finish_code: string | null;
+  /** Phase 2A additive column (Task 29). */
+  design_series: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -98,6 +111,40 @@ export interface ProductRow {
 /** Product row joined with its supplier's name, for list display. */
 export interface ProductWithSupplier extends ProductRow {
   suppliers: { id: string; name: string } | null;
+  /**
+   * Present only when the query explicitly embeds item_groups (Phase 2A
+   * filter bar / comparison view / picker). Optional so existing queries
+   * that don't embed it (e.g. plain `suppliers(id,name)` selects) keep
+   * typechecking without a query change.
+   */
+  item_groups?: { id: string; family_name: string; grade: GradeValue | null } | null;
+}
+
+/** §1.4 item_groups (Phase 2A, Task 28) */
+export interface ItemGroupRow {
+  id: string;
+  family_name: string;
+  grade: GradeValue | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** item_groups row joined with an aggregate product count, for the CRUD list. */
+export interface ItemGroupWithProductCount extends ItemGroupRow {
+  products: { count: number }[] | null;
+}
+
+/** item_group_merges audit log row (Task 30). */
+export interface ItemGroupMergeRow {
+  id: string;
+  surviving_group_id: string;
+  losing_group_family_name: string;
+  losing_group_grade: GradeValue | null;
+  product_count: number;
+  reason: string | null;
+  merged_by: string | null;
+  merged_at: string;
 }
 
 /** §1.10 Companies */

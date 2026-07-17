@@ -1,8 +1,16 @@
 "use client";
 
-import { useActionState, useEffect, useRef } from "react";
-import { CURRENCY_CODES, PRODUCT_CATEGORIES, type ProductRow, type SupplierRow } from "@/lib/supabase/types";
+import { useActionState, useEffect, useRef, useState, useTransition } from "react";
 import {
+  CURRENCY_CODES,
+  GRADE_VALUES,
+  PRODUCT_CATEGORIES,
+  type ItemGroupRow,
+  type ProductRow,
+  type SupplierRow,
+} from "@/lib/supabase/types";
+import {
+  createItemGroupInline,
   createProduct,
   updateProduct,
   type ProductFormResult,
@@ -34,10 +42,12 @@ const CATEGORY_LABELS: Record<string, string> = {
 export function ProductForm({
   product,
   suppliers,
+  itemGroups,
   onSaved,
 }: {
   product?: ProductRow;
   suppliers: SupplierRow[];
+  itemGroups: ItemGroupRow[];
   onSaved?: () => void;
 }) {
   const action = product ? updateProduct.bind(null, product.id) : createProduct;
@@ -49,6 +59,24 @@ export function ProductForm({
   const wasPending = useRef(false);
   const idSuffix = product?.id ?? "new";
 
+  // Inline item-group quick-create (Task 31). Kept local to this form
+  // instance rather than a separate component since it needs to write the
+  // newly-created group's id straight into this form's select. Groups
+  // created inline are tracked separately and merged with the server-
+  // provided `itemGroups` list at render time (rather than syncing a copy
+  // into state via an effect) so a group created moments ago still shows
+  // up even before the next server round-trip refreshes `itemGroups`.
+  const [locallyCreatedGroups, setLocallyCreatedGroups] = useState<ItemGroupRow[]>([]);
+  const [selectedGroupId, setSelectedGroupId] = useState(product?.item_group_id ?? "");
+  const [creatingGroup, setCreatingGroup] = useState(false);
+  const [newGroupName, setNewGroupName] = useState("");
+  const [newGroupGrade, setNewGroupGrade] = useState("");
+  const [groupError, setGroupError] = useState<string | null>(null);
+  const [groupPending, startGroupTransition] = useTransition();
+
+  const knownIds = new Set(itemGroups.map((g) => g.id));
+  const groups = [...itemGroups, ...locallyCreatedGroups.filter((g) => !knownIds.has(g.id))];
+
   useEffect(() => {
     if (wasPending.current && !pending && state.ok) {
       if (!product) formRef.current?.reset();
@@ -56,6 +84,32 @@ export function ProductForm({
     }
     wasPending.current = pending;
   }, [pending, state.ok, product, onSaved]);
+
+  function handleCreateGroup() {
+    setGroupError(null);
+    startGroupTransition(async () => {
+      const result = await createItemGroupInline(newGroupName, newGroupGrade);
+      if (!result.ok) {
+        setGroupError(result.error);
+        return;
+      }
+      setLocallyCreatedGroups((prev) => [
+        ...prev,
+        {
+          id: result.id,
+          family_name: newGroupName.trim(),
+          grade: (newGroupGrade || null) as ItemGroupRow["grade"],
+          notes: null,
+          created_at: "",
+          updated_at: "",
+        },
+      ]);
+      setSelectedGroupId(result.id);
+      setNewGroupName("");
+      setNewGroupGrade("");
+      setCreatingGroup(false);
+    });
+  }
 
   return (
     <form ref={formRef} action={formAction} className="grid gap-4 sm:grid-cols-2">
@@ -176,6 +230,110 @@ export function ProductForm({
             </option>
           ))}
         </select>
+      </div>
+
+      <div>
+        <label className={labelClass} htmlFor={`item-group-${idSuffix}`}>
+          Item group
+        </label>
+        <select
+          id={`item-group-${idSuffix}`}
+          name="item_group_id"
+          value={selectedGroupId}
+          onChange={(e) => setSelectedGroupId(e.target.value)}
+          className={`${inputClass} mt-1`}
+        >
+          <option value="">— ungrouped —</option>
+          {groups.map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.family_name}
+              {g.grade ? ` (${g.grade})` : ""}
+            </option>
+          ))}
+        </select>
+        {!creatingGroup ? (
+          <button
+            type="button"
+            onClick={() => setCreatingGroup(true)}
+            className="mt-1 text-xs font-medium text-veridan-accent underline underline-offset-2 hover:text-veridan-accent-soft"
+          >
+            + New item group
+          </button>
+        ) : (
+          <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-veridan-warm-gray-light bg-veridan-warm-gray-pale p-2">
+            <input
+              type="text"
+              value={newGroupName}
+              onChange={(e) => setNewGroupName(e.target.value)}
+              placeholder="Family name"
+              className={`${inputClass} max-w-[12rem]`}
+            />
+            <select
+              value={newGroupGrade}
+              onChange={(e) => setNewGroupGrade(e.target.value)}
+              className={`${inputClass} max-w-[8rem]`}
+              aria-label="New group grade"
+            >
+              <option value="">No grade</option>
+              {GRADE_VALUES.map((g) => (
+                <option key={g} value={g}>
+                  {g}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={handleCreateGroup}
+              disabled={groupPending || !newGroupName.trim()}
+              className="rounded-md bg-veridan-ink px-3 py-2 text-xs font-medium uppercase tracking-wide text-veridan-paper disabled:opacity-50"
+            >
+              {groupPending ? "Creating…" : "Create"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setCreatingGroup(false);
+                setGroupError(null);
+              }}
+              className="text-xs text-veridan-warm-gray underline underline-offset-2 hover:text-veridan-ink"
+            >
+              Cancel
+            </button>
+            {groupError && (
+              <p role="alert" className="w-full text-xs text-red-600">
+                {groupError}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <label className={labelClass} htmlFor={`finish-code-${idSuffix}`}>
+          Finish code
+        </label>
+        <input
+          id={`finish-code-${idSuffix}`}
+          type="text"
+          name="finish_code"
+          placeholder="US32D, US26D…"
+          defaultValue={product?.finish_code ?? ""}
+          className={`${inputClass} mt-1`}
+        />
+      </div>
+
+      <div>
+        <label className={labelClass} htmlFor={`design-series-${idSuffix}`}>
+          Design series
+        </label>
+        <input
+          id={`design-series-${idSuffix}`}
+          type="text"
+          name="design_series"
+          placeholder="Athens, Rhodes… (locksets only, optional)"
+          defaultValue={product?.design_series ?? ""}
+          className={`${inputClass} mt-1`}
+        />
       </div>
 
       <div>
