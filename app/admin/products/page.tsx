@@ -9,8 +9,9 @@ import {
 } from "@/lib/supabase/types";
 import { hasAnyFilter, parseProductFilterParams } from "@/lib/item-groups";
 import { InstructiveMessage } from "@/components/admin/InstructiveMessage";
+import { signPriceFileUrl, fileNameFromPath } from "@/lib/storage";
 import { ProductForm } from "./ProductForm";
-import { ProductListItem } from "./ProductListItem";
+import { ProductListItem, type ProductPriceProvenance } from "./ProductListItem";
 
 export const metadata = {
   title: "Products",
@@ -140,6 +141,40 @@ export default async function ProductsPage({
   }
 
   const products = data ?? [];
+
+  // Task 40 provenance surfacing: "last updated <date> from <source file>"
+  // for products whose current price came from a scanned upload. Most-recent
+  // product_price_history row per product, with its source file's signed
+  // download link (best-effort — history still shows without a link if
+  // signing fails, e.g. Storage not configured).
+  const priceProvenanceById = new Map<string, ProductPriceProvenance>();
+  if (products.length > 0) {
+    const { data: historyRows } = await supabase
+      .from("product_price_history")
+      .select("product_id, effective_date, price_file_uploads(original_filename, file_storage_path)")
+      .in(
+        "product_id",
+        products.map((p) => p.id)
+      )
+      .not("price_file_upload_id", "is", null)
+      .order("effective_date", { ascending: false })
+      .order("created_at", { ascending: false });
+
+    for (const row of (historyRows as unknown as Array<{
+      product_id: string;
+      effective_date: string;
+      price_file_uploads: { original_filename: string | null; file_storage_path: string } | null;
+    }>) ?? []) {
+      if (priceProvenanceById.has(row.product_id) || !row.price_file_uploads) continue;
+      const fileUrl = await signPriceFileUrl(supabase, row.price_file_uploads.file_storage_path);
+      priceProvenanceById.set(row.product_id, {
+        effectiveDate: row.effective_date,
+        fileName: row.price_file_uploads.original_filename ?? fileNameFromPath(row.price_file_uploads.file_storage_path),
+        fileUrl,
+      });
+    }
+  }
+
   const hasFilters = hasAnyFilter({ q, category, manufacturer, supplierId, itemGroupId, grade, finishCode });
   const inputClass =
     "w-full rounded-md border border-veridan-warm-gray-light bg-white px-3 py-2 text-sm text-veridan-ink focus:border-veridan-accent focus:outline-none";
@@ -315,7 +350,13 @@ export default async function ProductsPage({
         ) : (
           <ul className="rounded-md border border-veridan-warm-gray-light bg-white px-5">
             {products.map((product) => (
-              <ProductListItem key={product.id} product={product} suppliers={suppliers} itemGroups={itemGroups} />
+              <ProductListItem
+                key={product.id}
+                product={product}
+                suppliers={suppliers}
+                itemGroups={itemGroups}
+                priceProvenance={priceProvenanceById.get(product.id) ?? null}
+              />
             ))}
           </ul>
         )}

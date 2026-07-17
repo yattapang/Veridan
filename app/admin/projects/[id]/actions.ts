@@ -444,17 +444,20 @@ export async function createDoorRegisterQuote(
   redirect(`/admin/quotes/${quoteId}`);
 }
 
+export type CreateLineItemQuoteRecordResult =
+  | { ok: true; quoteId: string; error?: undefined }
+  | { ok: false; error: string };
+
 /**
- * Creates a line_item-mode quote (Task 17 — retrofit/simple jobs, §6.2) from
- * a project. Unlike the Door Register pipeline, there is no register to
- * materialize from: the quote is created empty (no origins, no lines) and the
- * founder adds product/ad-hoc lines directly on the builder page, which
- * regroups origin pools after every edit (lib/quotes/persist.ts
- * regroupLineItemOrigins). Same parameter/FX snapshot freeze as door_register
- * (§1.7) so the quote's numbers are immune to later parameter edits either
- * way.
+ * The non-redirecting core of the line_item-mode quote creation pipeline
+ * (Task 17). Factored out of `createLineItemQuote` so a caller that needs the
+ * new quote's id to keep working (e.g. Phase 2B Task 41's "seed a quote from
+ * this scan", which inserts quote_line_items right after creation) can call
+ * it directly instead of racing Next's `redirect()` throw. `createLineItemQuote`
+ * below is now a thin wrapper: same insert, then redirect — so the UI path
+ * (project page "Create quote" button) is unchanged.
  */
-export async function createLineItemQuote(projectId: string): Promise<ProjectActionResult> {
+export async function createLineItemQuoteRecord(projectId: string): Promise<CreateLineItemQuoteRecordResult> {
   let supabase;
   try {
     supabase = await createClient();
@@ -516,5 +519,21 @@ export async function createLineItemQuote(projectId: string): Promise<ProjectAct
 
   revalidatePath("/admin/quotes");
   revalidatePath(`/admin/projects/${projectId}`);
-  redirect(`/admin/quotes/${insertedQuote.id as string}`);
+  return { ok: true, quoteId: insertedQuote.id as string };
+}
+
+/**
+ * Creates a line_item-mode quote (Task 17 — retrofit/simple jobs, §6.2) from
+ * a project. Unlike the Door Register pipeline, there is no register to
+ * materialize from: the quote is created empty (no origins, no lines) and the
+ * founder adds product/ad-hoc lines directly on the builder page, which
+ * regroups origin pools after every edit (lib/quotes/persist.ts
+ * regroupLineItemOrigins). Same parameter/FX snapshot freeze as door_register
+ * (§1.7) so the quote's numbers are immune to later parameter edits either
+ * way.
+ */
+export async function createLineItemQuote(projectId: string): Promise<ProjectActionResult> {
+  const result = await createLineItemQuoteRecord(projectId);
+  if (!result.ok) return result;
+  redirect(`/admin/quotes/${result.quoteId}`);
 }

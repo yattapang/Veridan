@@ -212,10 +212,17 @@ export default async function PriceFileDetailPage({
               <strong>{needsReviewCount}</strong> to review.
             </p>
             <p className="mt-2 text-veridan-warm-gray">
-              The per-line review screen (accept / edit / reject, with the raw source text beside
-              each proposal) is the next build. Extracted rows are recorded as cost-side proposals
-              only — no library price, quote, margin, or FX has been changed.
+              Review each line (accept / edit / reject, with the raw source text beside each
+              proposal), then optionally seed a draft quote from the accepted rows.
             </p>
+            <div className="mt-4">
+              <Link
+                href={`/admin/price-files/${upload.id}/review`}
+                className="inline-block rounded-md bg-veridan-ink px-4 py-2 text-xs font-medium uppercase tracking-wide text-veridan-paper transition-opacity duration-150 hover:opacity-90"
+              >
+                {upload.extraction_status === "completed" ? "Open review" : "Review extracted lines"}
+              </Link>
+            </div>
           </div>
         )}
 

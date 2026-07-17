@@ -9,14 +9,27 @@ function formatCost(unitCost: number, currency: string) {
   return `${currency} ${unitCost.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
 }
 
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+}
+
+/** Task 40 — read-only provenance for a product's most recent scanned price update. */
+export interface ProductPriceProvenance {
+  effectiveDate: string;
+  fileName: string;
+  fileUrl: string | null;
+}
+
 export function ProductListItem({
   product,
   suppliers,
   itemGroups,
+  priceProvenance,
 }: {
   product: ProductWithSupplier;
   suppliers: SupplierRow[];
   itemGroups: ItemGroupRow[];
+  priceProvenance?: ProductPriceProvenance | null;
 }) {
   const [editing, setEditing] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -73,6 +86,23 @@ export function ProductListItem({
               : ""}
             {product.finish_code ? ` · finish ${product.finish_code}` : ""}
             {product.design_series ? ` · ${product.design_series}` : ""}
+          </p>
+        )}
+        {priceProvenance && (
+          <p className="mt-1 text-[11px] text-veridan-warm-gray">
+            Last updated {formatDate(priceProvenance.effectiveDate)} from{" "}
+            {priceProvenance.fileUrl ? (
+              <a
+                href={priceProvenance.fileUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-veridan-accent underline underline-offset-2 hover:text-veridan-accent-soft"
+              >
+                {priceProvenance.fileName}
+              </a>
+            ) : (
+              priceProvenance.fileName
+            )}
           </p>
         )}
         {error && (
