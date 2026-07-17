@@ -22,8 +22,6 @@ import { CURRENCY_CODES, type CurrencyCode, type ParametersSnapshotStored, type 
 
 export type QuoteLineActionResult = { ok: true; error?: undefined } | { ok: false; error: string };
 
-export const initialQuoteLineActionResult: QuoteLineActionResult = { ok: true };
-
 function isCurrencyCode(value: unknown): value is CurrencyCode {
   return typeof value === "string" && (CURRENCY_CODES as string[]).includes(value);
 }

@@ -9,8 +9,6 @@ export type SupplierFormResult =
   | { ok: true; error?: undefined }
   | { ok: false; error: string };
 
-export const initialSupplierFormResult: SupplierFormResult = { ok: true };
-
 function isCurrencyCode(value: unknown): value is CurrencyCode {
   return typeof value === "string" && (CURRENCY_CODES as string[]).includes(value);
 }

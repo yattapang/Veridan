@@ -5,9 +5,10 @@ import type { ContactRow } from "@/lib/supabase/types";
 import {
   createContact,
   updateContact,
-  initialContactFormResult,
   type ContactFormResult,
 } from "../actions";
+
+const initialContactFormResult: ContactFormResult = { ok: true };
 
 const inputClass =
   "w-full rounded-md border border-veridan-warm-gray-light bg-white px-3 py-2 text-sm text-veridan-ink focus:border-veridan-accent focus:outline-none";

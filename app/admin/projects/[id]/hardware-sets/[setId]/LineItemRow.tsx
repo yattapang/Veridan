@@ -3,7 +3,8 @@
 import { useActionState, useState, useTransition } from "react";
 import { CURRENCY_CODES, type HardwareSetLineItemWithDetails, type SupplierRow } from "@/lib/supabase/types";
 import { resolveLineCost, toUsdIndicative, type SupplierFxRates } from "@/lib/hardware-sets";
-import { deleteLineItem, initialLineItemActionResult, updateLineItem } from "./actions";
+import { deleteLineItem, updateLineItem } from "./actions";
+import { initialLineItemActionResult } from "./actionState";
 
 const inputClass =
   "w-full rounded-md border border-veridan-warm-gray-light bg-white px-3 py-2 text-sm text-veridan-ink focus:border-veridan-accent focus:outline-none";

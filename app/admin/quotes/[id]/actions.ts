@@ -20,20 +20,14 @@ export type OriginActionResult =
   | { ok: true; error?: undefined }
   | { ok: false; error: string };
 
-export const initialOriginActionResult: OriginActionResult = { ok: true };
-
 export type MarginActionResult =
   | { ok: true; requiresOverride?: false; error?: undefined; flags?: undefined }
   | { ok: false; requiresOverride: true; error: string; flags: MarginFlagSummary[] }
   | { ok: false; requiresOverride?: false; error: string; flags?: undefined };
 
-export const initialMarginActionResult: MarginActionResult = { ok: true };
-
 export type FxActionResult =
   | { ok: true; error?: undefined }
   | { ok: false; error: string };
-
-export const initialFxActionResult: FxActionResult = { ok: true };
 
 // ---------------------------------------------------------------------------
 // Helpers

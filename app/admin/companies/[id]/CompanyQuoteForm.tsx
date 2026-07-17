@@ -1,7 +1,10 @@
 "use client";
 
 import { useActionState } from "react";
-import { createRetrofitQuoteForCompany, initialCompanyQuoteActionResult } from "./quoteActions";
+import { createRetrofitQuoteForCompany } from "./quoteActions";
+import type { ProjectActionResult } from "@/app/admin/projects/[id]/actions";
+
+const initialCompanyQuoteActionResult: ProjectActionResult = { ok: true };
 
 const inputClass =
   "w-full rounded-md border border-veridan-warm-gray-light bg-white px-3 py-2 text-sm text-veridan-ink focus:border-veridan-accent focus:outline-none";

@@ -23,8 +23,6 @@ import type { BusinessParameterRow, QuoteOriginRow, QuoteRow, QuoteStatus } from
 
 export type WorkflowActionResult = { ok: true; error?: undefined } | { ok: false; error: string };
 
-export const initialWorkflowActionResult: WorkflowActionResult = { ok: true };
-
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** Loads just the quote fields every workflow action needs to guard + act on. */

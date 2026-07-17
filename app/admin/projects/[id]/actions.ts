@@ -26,8 +26,6 @@ export type ProjectActionResult =
   | { ok: true; error?: undefined }
   | { ok: false; error: string };
 
-export const initialProjectActionResult: ProjectActionResult = { ok: true };
-
 function isProjectType(value: unknown): value is ProjectType {
   return typeof value === "string" && (PROJECT_TYPES as string[]).includes(value);
 }

@@ -5,9 +5,10 @@ import { COMPANY_TYPES, type CompanyRow } from "@/lib/supabase/types";
 import {
   createCompany,
   updateCompany,
-  initialCompanyFormResult,
   type CompanyFormResult,
 } from "./actions";
+
+const initialCompanyFormResult: CompanyFormResult = { ok: true };
 
 const inputClass =
   "w-full rounded-md border border-veridan-warm-gray-light bg-white px-3 py-2 text-sm text-veridan-ink focus:border-veridan-accent focus:outline-none";

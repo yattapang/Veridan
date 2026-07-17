@@ -5,9 +5,10 @@ import { CURRENCY_CODES, type SupplierRow } from "@/lib/supabase/types";
 import {
   createSupplier,
   updateSupplier,
-  initialSupplierFormResult,
   type SupplierFormResult,
 } from "./actions";
+
+const initialSupplierFormResult: SupplierFormResult = { ok: true };
 
 const inputClass =
   "w-full rounded-md border border-veridan-warm-gray-light bg-white px-3 py-2 text-sm text-veridan-ink focus:border-veridan-accent focus:outline-none";

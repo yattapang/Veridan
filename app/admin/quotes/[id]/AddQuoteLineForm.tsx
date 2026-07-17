@@ -2,7 +2,8 @@
 
 import { useActionState, useEffect, useRef, useState } from "react";
 import { CURRENCY_CODES, type ProductWithSupplier, type SupplierRow } from "@/lib/supabase/types";
-import { addAdHocQuoteLine, addLibraryQuoteLine, initialQuoteLineActionResult } from "./lineItemActions";
+import { addAdHocQuoteLine, addLibraryQuoteLine } from "./lineItemActions";
+import { initialQuoteLineActionResult } from "./lineItemActionState";
 
 const inputClass =
   "w-full rounded-md border border-veridan-warm-gray-light bg-white px-3 py-2 text-sm text-veridan-ink focus:border-veridan-accent focus:outline-none";

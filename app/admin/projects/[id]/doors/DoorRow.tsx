@@ -2,7 +2,8 @@
 
 import { useActionState, useState, useTransition } from "react";
 import type { DoorWithHardwareSet, HardwareSetRow } from "@/lib/supabase/types";
-import { deleteDoor, duplicateDoor, initialDoorActionResult, updateDoor } from "./actions";
+import { deleteDoor, duplicateDoor, updateDoor } from "./actions";
+import { initialDoorActionResult } from "./actionState";
 
 const inputClass =
   "w-full rounded-md border border-veridan-warm-gray-light bg-white px-2 py-1.5 text-sm text-veridan-ink focus:border-veridan-accent focus:outline-none";

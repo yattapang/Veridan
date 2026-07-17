@@ -10,8 +10,6 @@ export type CompanyFormResult =
   | { ok: true; error?: undefined }
   | { ok: false; error: string };
 
-export const initialCompanyFormResult: CompanyFormResult = { ok: true };
-
 function isCompanyType(value: unknown): value is CompanyType {
   return typeof value === "string" && (COMPANY_TYPES as string[]).includes(value);
 }
@@ -103,8 +101,6 @@ export async function updateCompany(
 export type ContactFormResult =
   | { ok: true; error?: undefined }
   | { ok: false; error: string };
-
-export const initialContactFormResult: ContactFormResult = { ok: true };
 
 function parseContactFields(
   formData: FormData

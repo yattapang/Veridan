@@ -1,7 +1,8 @@
 "use client";
 
 import { useActionState } from "react";
-import { cloneHardwareSet, initialProjectActionResult } from "./actions";
+import { cloneHardwareSet } from "./actions";
+import { initialProjectActionResult } from "./actionState";
 
 const inputClass =
   "w-full rounded-md border border-veridan-warm-gray-light bg-white px-3 py-2 text-sm text-veridan-ink focus:border-veridan-accent focus:outline-none";

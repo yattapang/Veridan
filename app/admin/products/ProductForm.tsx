@@ -5,9 +5,10 @@ import { CURRENCY_CODES, PRODUCT_CATEGORIES, type ProductRow, type SupplierRow }
 import {
   createProduct,
   updateProduct,
-  initialProductFormResult,
   type ProductFormResult,
 } from "./actions";
+
+const initialProductFormResult: ProductFormResult = { ok: true };
 
 const inputClass =
   "w-full rounded-md border border-veridan-warm-gray-light bg-white px-3 py-2 text-sm text-veridan-ink focus:border-veridan-accent focus:outline-none";

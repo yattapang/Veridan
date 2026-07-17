@@ -2,7 +2,8 @@
 
 import { useActionState, useEffect, useRef, useState } from "react";
 import type { HardwareSetRow } from "@/lib/supabase/types";
-import { createDoor, initialDoorActionResult } from "./actions";
+import { createDoor } from "./actions";
+import { initialDoorActionResult } from "./actionState";
 
 const inputClass =
   "w-full rounded-md border border-veridan-warm-gray-light bg-white px-3 py-2 text-sm text-veridan-ink focus:border-veridan-accent focus:outline-none";

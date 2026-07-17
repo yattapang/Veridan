@@ -2,7 +2,9 @@
 
 import { useActionState, useState } from "react";
 import { formatJmd, formatUsd, OVERRIDE_TYPE_LABELS } from "@/lib/quotes/format";
-import { initialMarginActionResult, updateQuoteMargin } from "./actions";
+import { updateQuoteMargin, type MarginActionResult } from "./actions";
+
+const initialMarginActionResult: MarginActionResult = { ok: true };
 
 export interface MarginLine {
   lineId: string;

@@ -4,7 +4,9 @@ import { useActionState } from "react";
 import type { OriginResult } from "@/lib/landed-cost/types";
 import type { QuoteOriginRow } from "@/lib/supabase/types";
 import { formatUsd } from "@/lib/quotes/format";
-import { initialOriginActionResult, updateQuoteOrigin } from "./actions";
+import { updateQuoteOrigin, type OriginActionResult } from "./actions";
+
+const initialOriginActionResult: OriginActionResult = { ok: true };
 
 const inputClass =
   "w-full rounded-md border border-veridan-warm-gray-light bg-white px-2 py-1.5 text-sm text-veridan-ink focus:border-veridan-accent focus:outline-none disabled:bg-veridan-warm-gray-pale disabled:text-veridan-warm-gray";

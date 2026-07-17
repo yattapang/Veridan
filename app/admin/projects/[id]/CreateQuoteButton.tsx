@@ -1,7 +1,8 @@
 "use client";
 
 import { useActionState } from "react";
-import { createDoorRegisterQuote, initialProjectActionResult } from "./actions";
+import { createDoorRegisterQuote } from "./actions";
+import { initialProjectActionResult } from "./actionState";
 
 /**
  * Triggers the Door Register quote-materialization pipeline (Task 16). On

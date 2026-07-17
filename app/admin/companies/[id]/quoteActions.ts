@@ -4,8 +4,6 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
 import { createLineItemQuote, type ProjectActionResult } from "@/app/admin/projects/[id]/actions";
 
-export const initialCompanyQuoteActionResult: ProjectActionResult = { ok: true };
-
 /**
  * Retrofit/simple jobs (line_item mode, §6.2) don't always warrant a full
  * project the way a new-construction door register does — but

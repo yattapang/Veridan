@@ -7,10 +7,12 @@ import {
   approveQuote,
   createRevision,
   declineQuote,
-  initialWorkflowActionResult,
   markQuoteExpired,
   sendQuote,
+  type WorkflowActionResult,
 } from "./workflowActions";
+
+const initialWorkflowActionResult: WorkflowActionResult = { ok: true };
 
 const buttonClass =
   "rounded-md border border-veridan-warm-gray-light px-4 py-2 text-xs font-medium uppercase tracking-wide text-veridan-ink transition-opacity duration-150 hover:opacity-80 disabled:opacity-50";

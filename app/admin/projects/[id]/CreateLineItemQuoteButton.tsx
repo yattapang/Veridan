@@ -1,7 +1,8 @@
 "use client";
 
 import { useActionState } from "react";
-import { createLineItemQuote, initialProjectActionResult } from "./actions";
+import { createLineItemQuote } from "./actions";
+import { initialProjectActionResult } from "./actionState";
 
 /**
  * Creates an empty line_item-mode quote (Task 17 — retrofit/simple jobs)

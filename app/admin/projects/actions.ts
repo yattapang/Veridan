@@ -10,8 +10,6 @@ export type ProjectFormResult =
   | { ok: true; error?: undefined }
   | { ok: false; error: string };
 
-export const initialProjectFormResult: ProjectFormResult = { ok: true };
-
 function isProjectType(value: unknown): value is ProjectType {
   return typeof value === "string" && (PROJECT_TYPES as string[]).includes(value);
 }

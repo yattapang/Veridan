@@ -9,8 +9,6 @@ export type DoorActionResult =
   | { ok: true; error?: undefined }
   | { ok: false; error: string };
 
-export const initialDoorActionResult: DoorActionResult = { ok: true };
-
 /**
  * Parses the shared floor / door number / location / hardware set fields
  * from a door form submission and derives door_type from the door number
