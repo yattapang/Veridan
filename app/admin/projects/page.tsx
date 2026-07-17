@@ -58,7 +58,9 @@ export default async function ProjectsPage({
 
   let query = supabase
     .from("projects")
-    .select("*, companies(id, name)")
+    // Disambiguated: projects has two FKs into companies (company_id and
+    // architect_company_id) — PostgREST needs the explicit !constraint hint.
+    .select("*, companies!projects_company_id_fkey(id, name)")
     .order("created_at", { ascending: false });
   if (status) query = query.eq("status", status);
 

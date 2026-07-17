@@ -32,7 +32,9 @@ async function loadQuoteForWorkflow(
 ): Promise<{ quote: QuoteRow & { projects: { id: string; name: string; companies: { id: string; name: string } | null } | null } } | { error: string }> {
   const { data, error } = await supabase
     .from("quotes")
-    .select("*, projects(id, name, companies(id, name))")
+    // Disambiguated: projects has two FKs into companies (company_id and
+    // architect_company_id) — PostgREST needs the explicit !constraint hint.
+    .select("*, projects(id, name, companies!projects_company_id_fkey(id, name))")
     .eq("id", quoteId)
     .maybeSingle();
   if (error) return { error: `Could not load the quote: ${error.message}` };

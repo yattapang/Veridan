@@ -51,7 +51,9 @@ export default async function DoorRegisterPage({
   try {
     const { data, error } = await supabase
       .from("projects")
-      .select("*, companies(id, name)")
+      // Disambiguated: projects has two FKs into companies (company_id and
+      // architect_company_id) — PostgREST needs the explicit !constraint hint.
+      .select("*, companies!projects_company_id_fkey(id, name)")
       .eq("id", projectId)
       .maybeSingle();
     if (error) loadError = error.message;

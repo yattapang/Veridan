@@ -67,7 +67,10 @@ export default async function ProjectDetailPage({
   try {
     const { data, error } = await supabase
       .from("projects")
-      .select("*, companies(id, name)")
+      // "companies" is disambiguated: projects has two FKs into companies
+      // (company_id and architect_company_id) — PostgREST can't infer which
+      // one to embed without the explicit !constraint hint.
+      .select("*, companies!projects_company_id_fkey(id, name)")
       .eq("id", id)
       .maybeSingle();
     if (error) loadError = error.message;

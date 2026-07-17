@@ -42,7 +42,11 @@ export type QuotePdfLoadResult =
 export async function renderQuotePdf(supabase: Client, quoteId: string): Promise<QuotePdfLoadResult> {
   const { data: quoteData, error: quoteError } = await supabase
     .from("quotes")
-    .select("*, projects(id, name, site_address, architect_company_id, companies(id, name))")
+    // Disambiguated: projects has two FKs into companies (company_id and
+    // architect_company_id) — PostgREST needs the explicit !constraint hint.
+    .select(
+      "*, projects(id, name, site_address, architect_company_id, companies!projects_company_id_fkey(id, name))"
+    )
     .eq("id", quoteId)
     .maybeSingle();
 

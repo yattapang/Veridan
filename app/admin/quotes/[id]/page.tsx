@@ -80,7 +80,9 @@ export default async function QuoteBuilderPage({
 
   const { data: quoteData, error: quoteError } = await supabase
     .from("quotes")
-    .select("*, projects(id, name, companies(id, name))")
+    // Disambiguated: projects has two FKs into companies (company_id and
+    // architect_company_id) — PostgREST needs the explicit !constraint hint.
+    .select("*, projects(id, name, companies!projects_company_id_fkey(id, name))")
     .eq("id", id)
     .maybeSingle();
 

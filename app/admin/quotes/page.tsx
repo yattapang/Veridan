@@ -40,7 +40,9 @@ export default async function QuotesPage() {
   try {
     const { data, error } = await supabase
       .from("quotes")
-      .select("*, projects(id, name, companies(id, name))")
+      // Disambiguated: projects has two FKs into companies (company_id and
+      // architect_company_id) — PostgREST needs the explicit !constraint hint.
+      .select("*, projects(id, name, companies!projects_company_id_fkey(id, name))")
       .order("created_at", { ascending: false });
     if (error) loadError = error.message;
     else quotes = (data as unknown as QuoteWithProject[]) ?? [];
