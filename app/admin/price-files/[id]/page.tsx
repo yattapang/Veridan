@@ -5,6 +5,7 @@ import type { PriceFileUploadWithDetails } from "@/lib/supabase/types";
 import { InstructiveMessage } from "@/components/admin/InstructiveMessage";
 import { signPriceFileUrl, fileNameFromPath } from "@/lib/storage";
 import { extractionStatusBadgeClass, extractionStatusLabel } from "@/lib/price-files";
+import { RunExtractionButton } from "./RunExtractionButton";
 
 export async function generateMetadata({
   params,
@@ -97,6 +98,31 @@ export default async function PriceFileDetailPage({
   const fileUrl = await signPriceFileUrl(supabase, upload.file_storage_path);
   const displayName = upload.original_filename ?? fileNameFromPath(upload.file_storage_path);
 
+  // Extraction summary counts (Task 37 status display). Only meaningful once
+  // extraction has produced rows; harmless (0s) otherwise.
+  let lineCount = 0;
+  let confidentCount = 0;
+  let needsReviewCount = 0;
+  try {
+    const { data: rows } = await supabase
+      .from("extracted_prices")
+      .select("review_status")
+      .eq("price_file_upload_id", upload.id);
+    if (rows) {
+      lineCount = rows.length;
+      for (const r of rows as { review_status: string }[]) {
+        if (r.review_status === "confident") confidentCount++;
+        else if (r.review_status === "needs_review") needsReviewCount++;
+      }
+    }
+  } catch {
+    // Non-fatal — the page still renders without the counts.
+  }
+
+  const canRunExtraction =
+    upload.extraction_status === "pending" || upload.extraction_status === "failed";
+  const runLabel = upload.extraction_status === "failed" ? "Retry extraction" : "Run extraction";
+
   return (
     <div className="max-w-3xl">
       <Link
@@ -160,11 +186,51 @@ export default async function PriceFileDetailPage({
         </div>
       </section>
 
-      <section className="mt-8">
-        <InstructiveMessage
-          title="Extraction and review land in the next build"
-          body="This upload is recorded and its file is stored. Automated extraction (matching line items against the Hardware Library) and the accept/edit/reject review screen are a separate, upcoming build — nothing on this page triggers them yet."
-        />
+      <section className="mt-8 rounded-md border border-veridan-warm-gray-light bg-white px-5 py-5">
+        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">
+          Extraction
+        </h2>
+
+        {upload.extraction_status === "extracting" && (
+          <p className="text-sm text-veridan-warm-gray">
+            Extraction is running — Claude is reading the file and matching line items against the
+            Hardware Library. Reload this page in a moment to see the result.
+          </p>
+        )}
+
+        {upload.extraction_status === "failed" && (
+          <p className="mb-4 text-sm text-red-600">
+            {upload.error_message ?? "Extraction failed. Try running it again."}
+          </p>
+        )}
+
+        {(upload.extraction_status === "review" || upload.extraction_status === "completed") && (
+          <div className="text-sm text-veridan-ink">
+            <p>
+              Extraction produced <strong>{lineCount}</strong>{" "}
+              {lineCount === 1 ? "line" : "lines"} — <strong>{confidentCount}</strong> confident,{" "}
+              <strong>{needsReviewCount}</strong> to review.
+            </p>
+            <p className="mt-2 text-veridan-warm-gray">
+              The per-line review screen (accept / edit / reject, with the raw source text beside
+              each proposal) is the next build. Extracted rows are recorded as cost-side proposals
+              only — no library price, quote, margin, or FX has been changed.
+            </p>
+          </div>
+        )}
+
+        {upload.extraction_status === "pending" && (
+          <p className="mb-4 text-sm text-veridan-warm-gray">
+            This upload is recorded and its file is stored. Run extraction to have Claude read the
+            file and propose cost-side line items matched against the Hardware Library.
+          </p>
+        )}
+
+        {canRunExtraction && (
+          <div className="mt-4">
+            <RunExtractionButton uploadId={upload.id} label={runLabel} />
+          </div>
+        )}
       </section>
     </div>
   );
