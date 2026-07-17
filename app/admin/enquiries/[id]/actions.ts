@@ -10,8 +10,6 @@ export type ConvertResult =
   | { ok: true; error?: undefined }
   | { ok: false; error: string };
 
-export const initialConvertResult: ConvertResult = { ok: true };
-
 function isCompanyType(value: unknown): value is CompanyType {
   return typeof value === "string" && (COMPANY_TYPES as string[]).includes(value);
 }

@@ -2,7 +2,9 @@
 
 import { useActionState, useMemo, useState } from "react";
 import { COMPANY_TYPES, type CompanyRow, type EnquiryRow } from "@/lib/supabase/types";
-import { convertEnquiryToProject, initialConvertResult } from "./actions";
+import { convertEnquiryToProject, type ConvertResult } from "./actions";
+
+const initialConvertResult: ConvertResult = { ok: true };
 
 const inputClass =
   "w-full rounded-md border border-veridan-warm-gray-light bg-white px-3 py-2 text-sm text-veridan-ink focus:border-veridan-accent focus:outline-none";
