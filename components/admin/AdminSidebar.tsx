@@ -13,6 +13,7 @@ const NAV_ITEMS: { label: string; href: string }[] = [
   { label: "Suppliers", href: "/admin/suppliers" },
   { label: "Products", href: "/admin/products" },
   { label: "Item Groups", href: "/admin/item-groups" },
+  { label: "Price Files", href: "/admin/price-files" },
   { label: "Parameters", href: "/admin/parameters" },
   { label: "Overrides", href: "/admin/overrides" },
 ];

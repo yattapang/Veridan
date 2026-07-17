@@ -530,6 +530,89 @@ export interface PipelineViewRow {
   stage: PipelineStage;
 }
 
+// ---------------------------------------------------------------------------
+// §2.2 / §2.4 Phase 2B price-file ingestion (Task 36). Shapes match the
+// COMBINED schema: base tables from
+// supabase/migrations/20260713000001_schema.sql (§1.18) PLUS the delta in
+// supabase/migrations/20260718000001_price_ingestion.sql — that combined
+// shape is authoritative, not the base migration alone.
+// ---------------------------------------------------------------------------
+
+/** price_file_uploads.extraction_status — post-delta lifecycle (Task 35). */
+export type ExtractionStatus = "pending" | "extracting" | "review" | "completed" | "failed";
+export const EXTRACTION_STATUSES: ExtractionStatus[] = [
+  "pending",
+  "extracting",
+  "review",
+  "completed",
+  "failed",
+];
+
+/** §1.18 price_file_uploads, upgraded by the Task 35 delta migration. */
+export interface PriceFileUploadRow {
+  id: string;
+  supplier_id: string | null;
+  file_storage_path: string;
+  original_filename: string | null;
+  uploaded_by: string | null;
+  uploaded_at: string;
+  extraction_status: ExtractionStatus;
+  detected_supplier_confidence: number | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Upload row joined with supplier + uploader for list/detail display. */
+export interface PriceFileUploadWithDetails extends PriceFileUploadRow {
+  suppliers: { id: string; name: string } | null;
+  users: { id: string; email: string; display_name: string | null } | null;
+}
+
+/** extracted_prices.review_status — post-delta lifecycle (Task 35). */
+export type ExtractedPriceReviewStatus = "confident" | "needs_review" | "accepted" | "edited" | "rejected";
+export const EXTRACTED_PRICE_REVIEW_STATUSES: ExtractedPriceReviewStatus[] = [
+  "confident",
+  "needs_review",
+  "accepted",
+  "edited",
+  "rejected",
+];
+
+/** §1.18 extracted_prices, upgraded by the Task 35 delta migration. */
+export interface ExtractedPriceRow {
+  id: string;
+  price_file_upload_id: string;
+  matched_product_id: string | null;
+  item_group_match_id: string | null;
+  raw_extracted_text: unknown;
+  proposed_description: string | null;
+  proposed_product_ref: string | null;
+  proposed_qty: number | null;
+  proposed_unit_cost: number | null;
+  proposed_currency: CurrencyCode | null;
+  confidence_score: number | null;
+  confidence_threshold_used: number | null;
+  review_status: ExtractedPriceReviewStatus;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  applied_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** product_price_history (Task 35, new table — Plan §2.2 Stage 4a). */
+export interface ProductPriceHistoryRow {
+  id: string;
+  product_id: string;
+  price_file_upload_id: string | null;
+  unit_cost: number;
+  cost_currency: CurrencyCode;
+  effective_date: string;
+  recorded_by: string | null;
+  created_at: string;
+}
+
 /**
  * A de-duplicated summary of the engine's per-line margin flags, grouped by
  * breach type, used by the builder's override-capture UI (Task 16). `type`

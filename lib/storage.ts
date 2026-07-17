@@ -85,3 +85,45 @@ export async function signQuotePdfUrl(
     return null;
   }
 }
+
+/**
+ * Uploads a supplier price file to the private `price-files` bucket (Task
+ * 36, Plan §2.2 Stage 1). Path convention: `<uuid>/<original-filename>` per
+ * the Task 36 brief — `uploadId` is the `price_file_uploads.id` generated
+ * client-side before the insert, so the Storage path and the DB row agree
+ * without a second write. Founders are `authenticated`, which has full CRUD
+ * on this bucket per supabase/migrations/20260713000002_rls.sql.
+ */
+export async function uploadPriceFile(
+  supabase: SupabaseClient,
+  path: string,
+  file: File
+): Promise<{ error: string | null }> {
+  const { error } = await supabase.storage.from("price-files").upload(path, file, {
+    contentType: file.type || undefined,
+    upsert: false,
+  });
+  if (error) return { error: error.message };
+  return { error: null };
+}
+
+/**
+ * Signs a URL for a price file's stored object, for the detail page's file
+ * download link (Task 36). Best-effort, same pattern as
+ * signEnquiryFileUrls/signQuotePdfUrl — a failure to sign yields `null`
+ * rather than failing the page render.
+ */
+export async function signPriceFileUrl(
+  supabase: SupabaseClient,
+  path: string | null | undefined,
+  expiresInSeconds = 60 * 60
+): Promise<string | null> {
+  if (!path) return null;
+  try {
+    const { data, error } = await supabase.storage.from("price-files").createSignedUrl(path, expiresInSeconds);
+    if (error || !data) return null;
+    return data.signedUrl;
+  } catch {
+    return null;
+  }
+}
