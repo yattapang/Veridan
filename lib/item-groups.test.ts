@@ -144,7 +144,7 @@ describe("parseProductFilterParams", () => {
     expect(parsed.q).toBe("lockset");
     expect(parsed.category).toBe("locksets");
     expect(parsed.grade).toBe("Grade 1");
-    expect(parsed.financeCode).toBe("");
+    expect(parsed.finishCode).toBe("");
   });
 
   it("defaults every field to an empty string when absent", () => {
@@ -156,7 +156,7 @@ describe("parseProductFilterParams", () => {
       supplierId: "",
       itemGroupId: "",
       grade: "",
-      financeCode: "",
+      finishCode: "",
     });
   });
 });
@@ -164,13 +164,13 @@ describe("parseProductFilterParams", () => {
 describe("hasAnyFilter", () => {
   it("is false when every field is blank", () => {
     expect(
-      hasAnyFilter({ q: "", category: "", manufacturer: "", supplierId: "", itemGroupId: "", grade: "", financeCode: "" })
+      hasAnyFilter({ q: "", category: "", manufacturer: "", supplierId: "", itemGroupId: "", grade: "", finishCode: "" })
     ).toBe(false);
   });
 
   it("is true when any single field is set", () => {
     expect(
-      hasAnyFilter({ q: "", category: "", manufacturer: "", supplierId: "", itemGroupId: "g1", grade: "", financeCode: "" })
+      hasAnyFilter({ q: "", category: "", manufacturer: "", supplierId: "", itemGroupId: "g1", grade: "", finishCode: "" })
     ).toBe(true);
   });
 });

@@ -59,7 +59,7 @@ function parseProductFields(
   const manufacturer = String(formData.get("manufacturer") ?? "").trim();
   const productRef = String(formData.get("product_ref") ?? "").trim();
   const itemGroupIdRaw = String(formData.get("item_group_id") ?? "").trim();
-  const financeCode = String(formData.get("finish_code") ?? "").trim();
+  const finishCode = String(formData.get("finish_code") ?? "").trim();
   const designSeries = String(formData.get("design_series") ?? "").trim();
 
   return {
@@ -77,7 +77,7 @@ function parseProductFields(
       unit_cost: unitCost,
       cost_currency: costCurrency,
       item_group_id: itemGroupIdRaw || null,
-      finish_code: financeCode || null,
+      finish_code: finishCode || null,
       design_series: designSeries || null,
     },
   };

@@ -95,7 +95,7 @@ export interface ProductFilterParams {
   supplierId: string;
   itemGroupId: string;
   grade: string;
-  financeCode: string;
+  finishCode: string;
 }
 
 function firstParam(value: string | string[] | undefined): string {
@@ -121,7 +121,7 @@ export function parseProductFilterParams(
     supplierId: firstParam(params.supplier_id).trim(),
     itemGroupId: firstParam(params.item_group_id).trim(),
     grade: firstParam(params.grade).trim(),
-    financeCode: firstParam(params.finish_code).trim(),
+    finishCode: firstParam(params.finish_code).trim(),
   };
 }
 
@@ -133,6 +133,6 @@ export function hasAnyFilter(filters: ProductFilterParams): boolean {
       filters.supplierId ||
       filters.itemGroupId ||
       filters.grade ||
-      filters.financeCode
+      filters.finishCode
   );
 }

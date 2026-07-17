@@ -40,7 +40,7 @@ export default async function ProductsPage({
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const params = await searchParams;
-  const { q, category, manufacturer, supplierId, itemGroupId, grade, financeCode } =
+  const { q, category, manufacturer, supplierId, itemGroupId, grade, finishCode } =
     parseProductFilterParams(params);
 
   let supabase;
@@ -107,7 +107,7 @@ export default async function ProductsPage({
   if (category) query = query.eq("generic_category", category);
   if (manufacturer) query = query.ilike("manufacturer", `%${manufacturer.replace(/[,%]/g, " ").trim()}%`);
   if (supplierId) query = query.eq("supplier_id", supplierId);
-  if (financeCode) query = query.eq("finish_code", financeCode);
+  if (finishCode) query = query.eq("finish_code", finishCode);
   if (itemGroupId) {
     query = query.eq("item_group_id", itemGroupId);
   } else if (gradeGroupIds) {
@@ -140,7 +140,7 @@ export default async function ProductsPage({
   }
 
   const products = data ?? [];
-  const hasFilters = hasAnyFilter({ q, category, manufacturer, supplierId, itemGroupId, grade, financeCode });
+  const hasFilters = hasAnyFilter({ q, category, manufacturer, supplierId, itemGroupId, grade, finishCode });
   const inputClass =
     "w-full rounded-md border border-veridan-warm-gray-light bg-white px-3 py-2 text-sm text-veridan-ink focus:border-veridan-accent focus:outline-none";
 
@@ -269,7 +269,7 @@ export default async function ProductsPage({
               id="finish_code"
               type="text"
               name="finish_code"
-              defaultValue={financeCode}
+              defaultValue={finishCode}
               placeholder="US32D…"
               className={`${inputClass} mt-1`}
             />
