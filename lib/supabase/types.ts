@@ -396,6 +396,10 @@ export interface QuoteRow {
   approved_at: string | null;
   /** Task 19 additive column — recipient address the quote was actually emailed to. */
   sent_to: string | null;
+  /** Task 47 additive column — see 20260718000002_invoicing.sql for placement rationale. */
+  customs_cleared_at: string | null;
+  /** Task 47 additive column. */
+  customs_cleared_by: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -407,6 +411,65 @@ export interface QuoteWithProject extends QuoteRow {
     name: string;
     companies: { id: string; name: string } | null;
   } | null;
+}
+
+// ---------------------------------------------------------------------------
+// Invoicing (Phase 2C, Tasks 44-47) — see 20260718000002_invoicing.sql
+// ---------------------------------------------------------------------------
+
+export type InvoiceType = "deposit" | "balance";
+export const INVOICE_TYPES: InvoiceType[] = ["deposit", "balance"];
+
+export type InvoiceStatus = "draft" | "issued" | "sent" | "paid" | "partially_paid" | "void";
+export const INVOICE_STATUSES: InvoiceStatus[] = [
+  "draft",
+  "issued",
+  "sent",
+  "paid",
+  "partially_paid",
+  "void",
+];
+
+export interface InvoiceRow {
+  id: string;
+  invoice_number: string;
+  quote_id: string;
+  project_id: string | null;
+  company_id: string | null;
+  invoice_type: InvoiceType;
+  status: InvoiceStatus;
+  subtotal_jmd: number | null;
+  gct_amount_jmd: number;
+  amount_jmd: number;
+  amount_usd: number | null;
+  fx_note: string | null;
+  due_note: string | null;
+  issued_at: string | null;
+  sent_at: string | null;
+  sent_to: string | null;
+  pdf_storage_path: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Invoice joined with quote/project/company, for the list/detail views. */
+export interface InvoiceWithRefs extends InvoiceRow {
+  quotes: { id: string; quote_ref: string } | null;
+  projects: { id: string; name: string } | null;
+  companies: { id: string; name: string } | null;
+}
+
+export interface InvoicePaymentRow {
+  id: string;
+  invoice_id: string;
+  amount_jmd: number;
+  paid_at: string;
+  method: string | null;
+  reference: string | null;
+  notes: string | null;
+  recorded_by: string | null;
+  created_at: string;
 }
 
 /** §1.8 Quote Origins (shipment cost pools per quote) */

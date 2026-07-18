@@ -19,6 +19,7 @@ import { formatValidUntil } from "@/lib/quote-pdf/format";
 import { buildFxSnapshot, buildParametersSnapshot } from "@/lib/quotes/snapshot";
 import { loadQuoteState, recomputeQuote } from "@/lib/quotes/persist";
 import { canEdit, canTransition, nextRevisionNumber, revisionQuoteRef } from "@/lib/quotes/workflow";
+import { generateBalanceInvoiceForQuote, generateDepositInvoiceForQuote } from "@/lib/invoices/generate";
 import type { BusinessParameterRow, QuoteOriginRow, QuoteRow, QuoteStatus } from "@/lib/supabase/types";
 
 export type WorkflowActionResult = { ok: true; error?: undefined } | { ok: false; error: string };
@@ -201,8 +202,38 @@ export async function sendQuote(
 // Accept / decline / manual expire
 // ---------------------------------------------------------------------------
 
+/**
+ * Accept (§6.4) + deposit invoice auto-generation (Task 46, PRD §9.3). The
+ * accept transition is single-winner via applySimpleTransition's
+ * canTransition guard and commits first; invoice generation runs only after
+ * that succeeds and its failure is reported as a SEPARATE problem on top of
+ * an already-successful accept — it must never look like (or actually be) a
+ * rollback of the accept itself.
+ */
 export async function acceptQuote(quoteId: string): Promise<WorkflowActionResult> {
-  return applySimpleTransition(quoteId, "accepted", { accepted_at: new Date().toISOString() });
+  const transition = await applySimpleTransition(quoteId, "accepted", { accepted_at: new Date().toISOString() });
+  if (!transition.ok) return transition;
+
+  let supabase;
+  try {
+    supabase = await createClient();
+  } catch (err) {
+    return {
+      ok: false,
+      error: `Quote accepted; deposit invoice creation failed: ${
+        err instanceof Error ? err.message : "Supabase is not configured."
+      }`,
+    };
+  }
+  const user = await getCurrentUser();
+
+  const invoiceResult = await generateDepositInvoiceForQuote(supabase, quoteId, user?.id ?? null);
+  if (!invoiceResult.ok) {
+    return { ok: false, error: `Quote accepted; deposit invoice creation failed: ${invoiceResult.error}` };
+  }
+
+  revalidatePath("/admin/invoices");
+  return { ok: true };
 }
 
 export async function declineQuote(quoteId: string): Promise<WorkflowActionResult> {
@@ -218,6 +249,71 @@ export async function declineQuote(quoteId: string): Promise<WorkflowActionResul
  */
 export async function markQuoteExpired(quoteId: string): Promise<WorkflowActionResult> {
   return applySimpleTransition(quoteId, "expired");
+}
+
+// ---------------------------------------------------------------------------
+// Mark customs cleared -> balance invoice generation (Task 47)
+// ---------------------------------------------------------------------------
+
+/**
+ * Founder-triggered "Mark customs cleared" (Phase2_Plan §8 Q6 RESOLUTION):
+ * the manual event that generates the balance invoice. Single-winner via a
+ * conditional UPDATE (only accepted + not-already-cleared quotes match), so
+ * a double-click can never stamp the event twice or generate two balance
+ * invoices — mirrors the same pattern applySimpleTransition uses for status,
+ * applied here to a plain timestamp column instead of the status enum.
+ * Balance invoice generation runs only after the stamp commits and, like
+ * acceptQuote, a generation failure is reported as a separate problem on top
+ * of an already-committed "customs cleared" fact rather than undone.
+ */
+export async function markCustomsCleared(quoteId: string): Promise<WorkflowActionResult> {
+  let supabase;
+  try {
+    supabase = await createClient();
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Supabase is not configured." };
+  }
+
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "You must be signed in to mark customs cleared." };
+
+  const loaded = await loadQuoteForWorkflow(supabase, quoteId);
+  if ("error" in loaded) return { ok: false, error: loaded.error };
+  const { quote } = loaded;
+
+  if (quote.status !== "accepted") {
+    return { ok: false, error: "Only an accepted quote can be marked customs cleared." };
+  }
+  if (quote.customs_cleared_at) {
+    return { ok: false, error: "Customs was already marked cleared for this quote." };
+  }
+
+  const { data: won, error: updateError } = await supabase
+    .from("quotes")
+    .update({ customs_cleared_at: new Date().toISOString(), customs_cleared_by: user.id })
+    .eq("id", quoteId)
+    .eq("status", "accepted")
+    .is("customs_cleared_at", null)
+    .select("id")
+    .maybeSingle();
+
+  if (updateError) return { ok: false, error: `Could not mark customs cleared: ${updateError.message}` };
+  if (!won) {
+    return {
+      ok: false,
+      error: "Customs was already marked cleared for this quote (refresh to see the balance invoice).",
+    };
+  }
+
+  revalidateQuote(quoteId, quote.projects?.id);
+
+  const invoiceResult = await generateBalanceInvoiceForQuote(supabase, quoteId, user.id);
+  if (!invoiceResult.ok) {
+    return { ok: false, error: `Customs marked cleared; balance invoice creation failed: ${invoiceResult.error}` };
+  }
+
+  revalidatePath("/admin/invoices");
+  return { ok: true };
 }
 
 // ---------------------------------------------------------------------------

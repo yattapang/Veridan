@@ -28,9 +28,13 @@ import { AddQuoteLineForm } from "./AddQuoteLineForm";
 import { QuoteLineRow } from "./QuoteLineRow";
 import { StatusTimeline } from "./StatusTimeline";
 import { WorkflowPanel } from "./WorkflowPanel";
+import { CustomsClearedPanel } from "./CustomsClearedPanel";
 import { loadDefaultRecipientEmail } from "@/lib/quotes/persist";
 import { isComputedExpired } from "@/lib/quotes/workflow";
 import { signQuotePdfUrl } from "@/lib/storage";
+import type { InvoiceRow } from "@/lib/supabase/types";
+import { INVOICE_STATUS_BADGE, INVOICE_STATUS_LABELS, INVOICE_TYPE_LABELS } from "@/lib/invoices/format";
+import { formatJmd } from "@/lib/quotes/format";
 
 const MODE_LABELS: Record<string, string> = {
   door_register: "Door Register mode",
@@ -183,7 +187,7 @@ export default async function QuoteBuilderPage({
 
   // Workflow extras: default send recipient, sent-artifact link, sibling revisions.
   const companyId = quote.projects?.companies?.id ?? null;
-  const [defaultRecipientEmail, sentPdfUrl, prevRevisionResult, nextRevisionResult] = await Promise.all([
+  const [defaultRecipientEmail, sentPdfUrl, prevRevisionResult, nextRevisionResult, invoicesResult] = await Promise.all([
     quote.status === "approved" ? loadDefaultRecipientEmail(supabase, companyId) : Promise.resolve(null),
     signQuotePdfUrl(supabase, quote.pdf_storage_path),
     quote.parent_quote_id
@@ -196,9 +200,15 @@ export default async function QuoteBuilderPage({
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
+    // Task 47: linked invoices (deposit auto-generated on accept, balance on
+    // customs cleared) — shown regardless of status so a founder can see
+    // history even after a revision or decline.
+    supabase.from("invoices").select("*").eq("quote_id", quote.id).order("created_at", { ascending: true }),
   ]);
   const prevRevision = prevRevisionResult.data as { id: string; quote_ref: string; revision_number: number } | null;
   const nextRevision = nextRevisionResult.data as { id: string; quote_ref: string; revision_number: number } | null;
+  const invoices = (invoicesResult.data as InvoiceRow[]) ?? [];
+  const hasActiveDepositInvoice = invoices.some((inv) => inv.invoice_type === "deposit" && inv.status !== "void");
 
   // Run the engine over the quote's own frozen snapshots for live display.
   const result = computeQuoteResult({ quote, origins, lines });
@@ -617,6 +627,53 @@ export default async function QuoteBuilderPage({
               </li>
             ))}
           </ul>
+        )}
+      </section>
+
+      {/* Linked invoices + customs-cleared trigger (Tasks 46/47) */}
+      <section className="mt-8">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">Invoices</h2>
+        {invoices.length === 0 ? (
+          <p className="mb-4 text-sm text-veridan-warm-gray">
+            No invoices yet — a deposit invoice is generated automatically when this quote is accepted.
+          </p>
+        ) : (
+          <ul className="mb-4 space-y-2">
+            {invoices.map((inv) => (
+              <li
+                key={inv.id}
+                className="flex flex-wrap items-center gap-3 rounded-md border border-veridan-warm-gray-light bg-white px-4 py-3 text-sm"
+              >
+                <Link
+                  href={`/admin/invoices/${inv.id}`}
+                  className="font-medium text-veridan-accent underline underline-offset-2 hover:text-veridan-accent-soft"
+                >
+                  {inv.invoice_number}
+                </Link>
+                <span className="text-veridan-warm-gray">{INVOICE_TYPE_LABELS[inv.invoice_type]}</span>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${INVOICE_STATUS_BADGE[inv.status]}`}
+                >
+                  {INVOICE_STATUS_LABELS[inv.status]}
+                </span>
+                <span className="ml-auto font-medium text-veridan-ink">{formatJmd(inv.amount_jmd, 2)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {quote.status === "accepted" && (
+          <div className="rounded-md border border-veridan-warm-gray-light bg-white px-5 py-5">
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-veridan-warm-gray">
+              Customs clearance
+            </h3>
+            <CustomsClearedPanel
+              quoteId={quote.id}
+              canMarkCleared={quote.status === "accepted"}
+              customsClearedAt={quote.customs_cleared_at}
+              hasDepositInvoice={hasActiveDepositInvoice}
+            />
+          </div>
         )}
       </section>
 
