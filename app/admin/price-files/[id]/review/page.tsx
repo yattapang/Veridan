@@ -11,7 +11,13 @@ import type {
   ProjectWithCompany,
   SupplierRow,
 } from "@/lib/supabase/types";
-import { classifyMatchKind, computeUploadProgress, selectBulkAcceptableRowIds } from "@/lib/price-extraction/review";
+import {
+  classifyMatchKind,
+  computeUploadProgress,
+  isCrossSupplierProductMatch,
+  selectBulkAcceptableRowIds,
+} from "@/lib/price-extraction/review";
+import { signPriceFileUrl, fileNameFromPath } from "@/lib/storage";
 import { SupplierGateForm } from "./SupplierGateForm";
 import { AcceptAllButton } from "./AcceptAllButton";
 import { ReviewRow, type ItemGroupMatchInfo, type MatchedProductInfo } from "./ReviewRow";
@@ -82,7 +88,13 @@ export default async function PriceFileReviewPage({ params }: { params: Promise<
       supabase.from("suppliers").select("*").eq("active", true).order("name"),
       supabase.from("item_groups").select("*").order("family_name"),
       supabase.from("companies").select("*").order("name"),
-      supabase.from("projects").select("*, companies(id, name)").eq("status", "active").order("name"),
+      supabase
+        .from("projects")
+        // Disambiguated: projects has two FKs into companies (company_id and
+        // architect_company_id) — PostgREST needs the explicit !constraint hint.
+        .select("*, companies!projects_company_id_fkey(id, name)")
+        .eq("status", "active")
+        .order("name"),
     ]);
 
   const rows = (rowsData as ExtractedPriceRow[]) ?? [];
@@ -112,7 +124,12 @@ export default async function PriceFileReviewPage({ params }: { params: Promise<
   ]);
 
   const matchedProductsById = new Map<string, MatchedProductInfo>();
+  // Matched-product supplier lookup for the bulk-accept selection (review
+  // finding MAJOR-5): rows matching another supplier's product are excluded
+  // from "Accept all confident" and reviewed per-row instead.
+  const productSupplierById = new Map<string, string | null>();
   for (const p of (matchedProductsData as unknown as ProductJoinRow[]) ?? []) {
+    productSupplierById.set(p.id, p.supplier_id);
     matchedProductsById.set(p.id, {
       id: p.id,
       description: p.description,
@@ -136,9 +153,15 @@ export default async function PriceFileReviewPage({ params }: { params: Promise<
   const itemGroupsById = new Map(itemGroups.map((g) => [g.id, g]));
 
   const progress = computeUploadProgress(rows.map((r) => r.review_status));
-  const bulkAcceptableCount = selectBulkAcceptableRowIds(rows).length;
+  const bulkAcceptableCount = selectBulkAcceptableRowIds(rows, upload.supplier_id, productSupplierById).length;
   const acceptedCount = rows.filter((r) => r.review_status === "accepted" || r.review_status === "edited").length;
   const displayName = upload.suppliers?.name ? `${upload.suppliers.name} quote` : "Price file";
+
+  // "Download original file" link (review finding MINOR-3): lets founders
+  // spot-check the raw document against the extraction. Best-effort — the
+  // page still renders without the link if signing fails.
+  const originalFileUrl = await signPriceFileUrl(supabase, upload.file_storage_path);
+  const originalFileName = upload.original_filename ?? fileNameFromPath(upload.file_storage_path);
 
   return (
     <div className="max-w-6xl">
@@ -149,7 +172,19 @@ export default async function PriceFileReviewPage({ params }: { params: Promise<
         ← Back to upload
       </Link>
 
-      <h1 className="mt-3 text-2xl font-semibold text-veridan-ink">Review: {displayName}</h1>
+      <div className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-1">
+        <h1 className="text-2xl font-semibold text-veridan-ink">Review: {displayName}</h1>
+        {originalFileUrl && (
+          <a
+            href={originalFileUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs font-medium text-veridan-accent underline underline-offset-2 hover:text-veridan-accent-soft"
+          >
+            Download original file ({originalFileName})
+          </a>
+        )}
+      </div>
       <p className="mt-2 text-sm text-veridan-warm-gray">
         {progress.total} line{progress.total === 1 ? "" : "s"} extracted — {progress.resolved} resolved
         {progress.remaining > 0 ? `, ${progress.remaining} remaining` : ", all resolved"}. Accepted rows update the
@@ -191,6 +226,16 @@ export default async function PriceFileReviewPage({ params }: { params: Promise<
               <tbody>
                 {rows.map((row) => {
                   const matchKind = classifyMatchKind(row);
+                  // Review finding MAJOR-5: a match against another supplier's
+                  // product is accepted as a NEW offering for this supplier
+                  // (category required), never an in-place overwrite.
+                  const crossSupplier =
+                    matchKind === "existing_product" && row.matched_product_id
+                      ? isCrossSupplierProductMatch(
+                          productSupplierById.get(row.matched_product_id) ?? null,
+                          upload.supplier_id
+                        )
+                      : false;
                   const matchedProduct = row.matched_product_id
                     ? (matchedProductsById.get(row.matched_product_id) ?? null)
                     : null;
@@ -211,6 +256,7 @@ export default async function PriceFileReviewPage({ params }: { params: Promise<
                       matchedProduct={matchedProduct}
                       itemGroupMatch={itemGroupMatch}
                       itemGroups={itemGroups}
+                      crossSupplier={crossSupplier}
                       disabled={!upload.supplier_id}
                     />
                   );

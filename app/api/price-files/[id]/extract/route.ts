@@ -16,6 +16,14 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
 import { runExtraction } from "@/lib/price-extraction/extract";
 
+/**
+ * Route segment config (Next's app-segment maxDuration, in seconds): the
+ * Claude call over a multi-page PDF can far exceed the platform's default
+ * function timeout, and a killed function wedges the upload in 'extracting'
+ * (review finding MAJOR-4). 300s is the Vercel Hobby-plan maximum.
+ */
+export const maxDuration = 300;
+
 export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 

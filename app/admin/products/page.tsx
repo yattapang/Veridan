@@ -160,19 +160,36 @@ export default async function ProductsPage({
       .order("effective_date", { ascending: false })
       .order("created_at", { ascending: false });
 
+    // First pass: keep only the most recent history row per product, then
+    // sign all the file URLs in parallel (NIT-2) — sequential awaits here
+    // were one Storage round-trip per product.
+    const latestByProduct = new Map<
+      string,
+      { effectiveDate: string; fileName: string; storagePath: string }
+    >();
     for (const row of (historyRows as unknown as Array<{
       product_id: string;
       effective_date: string;
       price_file_uploads: { original_filename: string | null; file_storage_path: string } | null;
     }>) ?? []) {
-      if (priceProvenanceById.has(row.product_id) || !row.price_file_uploads) continue;
-      const fileUrl = await signPriceFileUrl(supabase, row.price_file_uploads.file_storage_path);
-      priceProvenanceById.set(row.product_id, {
+      if (latestByProduct.has(row.product_id) || !row.price_file_uploads) continue;
+      latestByProduct.set(row.product_id, {
         effectiveDate: row.effective_date,
         fileName: row.price_file_uploads.original_filename ?? fileNameFromPath(row.price_file_uploads.file_storage_path),
-        fileUrl,
+        storagePath: row.price_file_uploads.file_storage_path,
       });
     }
+    const entries = [...latestByProduct.entries()];
+    const fileUrls = await Promise.all(
+      entries.map(([, entry]) => signPriceFileUrl(supabase, entry.storagePath))
+    );
+    entries.forEach(([productId, entry], i) => {
+      priceProvenanceById.set(productId, {
+        effectiveDate: entry.effectiveDate,
+        fileName: entry.fileName,
+        fileUrl: fileUrls[i],
+      });
+    });
   }
 
   const hasFilters = hasAnyFilter({ q, category, manufacturer, supplierId, itemGroupId, grade, finishCode });

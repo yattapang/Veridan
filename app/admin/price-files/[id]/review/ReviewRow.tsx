@@ -75,6 +75,7 @@ export function ReviewRow({
   matchedProduct,
   itemGroupMatch,
   itemGroups,
+  crossSupplier,
   disabled,
 }: {
   uploadId: string;
@@ -83,6 +84,8 @@ export function ReviewRow({
   matchedProduct: MatchedProductInfo | null;
   itemGroupMatch: ItemGroupMatchInfo | null;
   itemGroups: ItemGroupRow[];
+  /** MAJOR-5: matched product belongs to a different supplier — accepting creates a new offering. */
+  crossSupplier: boolean;
   disabled: boolean;
 }) {
   const [editing, setEditing] = useState(false);
@@ -94,7 +97,10 @@ export function ReviewRow({
   const [rejectError, setRejectError] = useState<string | null>(null);
 
   const resolved = row.review_status === "accepted" || row.review_status === "edited" || row.review_status === "rejected";
-  const needsCategory = matchKind !== "existing_product";
+  // Cross-supplier existing-product matches also need a category: accepting
+  // them creates THIS supplier's own offering (server-enforced, MAJOR-5)
+  // rather than overwriting the other supplier's row.
+  const needsCategory = matchKind !== "existing_product" || crossSupplier;
   const tier = confidenceTier(row.confidence_score);
 
   function handleReject() {
@@ -176,7 +182,11 @@ export function ReviewRow({
             {needsCategory && (
               <div className="rounded-md border border-veridan-warm-gray-light bg-veridan-warm-gray-pale p-2">
                 <p className="text-[10px] font-medium uppercase tracking-wide text-veridan-warm-gray">
-                  {matchKind === "item_group" ? "New offering for this item group" : "New product — minimal details"}
+                  {crossSupplier
+                    ? "New offering for this supplier (matched product belongs to a different supplier)"
+                    : matchKind === "item_group"
+                      ? "New offering for this item group"
+                      : "New product — minimal details"}
                 </p>
                 <div className="mt-1 flex flex-wrap gap-2">
                   <select
@@ -252,6 +262,11 @@ export function ReviewRow({
               {matchedProduct.supplierName ?? "Unknown supplier"} · current {matchedProduct.unit_cost}{" "}
               {matchedProduct.cost_currency}
             </p>
+            {crossSupplier && (
+              <p className="mt-1 text-[10px] uppercase tracking-wide text-amber-700">
+                Different supplier — accepting creates this supplier&apos;s own offering
+              </p>
+            )}
           </div>
         )}
         {matchKind === "item_group" && itemGroupMatch && (

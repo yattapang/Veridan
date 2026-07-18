@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  STALE_EXTRACTION_MINUTES,
+  buildExtractionSystemPrompt,
+  checkExtractionStartAllowed,
   classifyExtractionFile,
+  isExtractionStale,
   parseExtraction,
+  staleExtractionCutoffIso,
   stripJsonFences,
 } from "./extraction-core";
 
@@ -125,5 +130,65 @@ describe("parseExtraction", () => {
   it("fails on an empty response", () => {
     const result = parseExtraction("   ");
     expect(result.ok).toBe(false);
+  });
+});
+
+describe("buildExtractionSystemPrompt", () => {
+  it("instructs the model to ignore instructions embedded in the document (MINOR-3)", () => {
+    const prompt = buildExtractionSystemPrompt();
+    expect(prompt).toMatch(/ignore any instructions/i);
+    expect(prompt).toMatch(/transcribe what is printed/i);
+  });
+});
+
+describe("isExtractionStale / staleExtractionCutoffIso", () => {
+  const now = Date.parse("2026-07-18T12:00:00.000Z");
+
+  it("not stale within the window", () => {
+    expect(isExtractionStale("2026-07-18T11:55:00.000Z", now)).toBe(false);
+  });
+  it("stale once older than the window", () => {
+    expect(isExtractionStale("2026-07-18T11:49:59.000Z", now)).toBe(true);
+  });
+  it("exactly at the boundary is not yet stale", () => {
+    const boundary = new Date(now - STALE_EXTRACTION_MINUTES * 60_000).toISOString();
+    expect(isExtractionStale(boundary, now)).toBe(false);
+  });
+  it("an unreadable timestamp is treated as stale rather than wedging the upload", () => {
+    expect(isExtractionStale("not-a-date", now)).toBe(true);
+  });
+  it("cutoff is exactly the staleness window before now", () => {
+    expect(staleExtractionCutoffIso(now)).toBe(
+      new Date(now - STALE_EXTRACTION_MINUTES * 60_000).toISOString()
+    );
+  });
+});
+
+describe("checkExtractionStartAllowed", () => {
+  const now = Date.parse("2026-07-18T12:00:00.000Z");
+  const fresh = "2026-07-18T11:58:00.000Z";
+  const stale = "2026-07-18T11:00:00.000Z";
+
+  it("allows pending and failed uploads", () => {
+    expect(checkExtractionStartAllowed("pending", fresh, now)).toEqual({ ok: true, retryOfStale: false });
+    expect(checkExtractionStartAllowed("failed", stale, now)).toEqual({ ok: true, retryOfStale: false });
+  });
+
+  it("refuses a fresh in-flight extraction", () => {
+    const gate = checkExtractionStartAllowed("extracting", fresh, now);
+    expect(gate.ok).toBe(false);
+    if (!gate.ok) expect(gate.error).toMatch(/already running/i);
+  });
+
+  it("allows retrying a stalled extraction, flagged as a stale retry (MAJOR-4)", () => {
+    expect(checkExtractionStartAllowed("extracting", stale, now)).toEqual({ ok: true, retryOfStale: true });
+  });
+
+  it("refuses review/completed uploads — a re-run would destroy review work (MAJOR-3)", () => {
+    for (const status of ["review", "completed"] as const) {
+      const gate = checkExtractionStartAllowed(status, stale, now);
+      expect(gate.ok).toBe(false);
+      if (!gate.ok) expect(gate.error).toMatch(/already been extracted/i);
+    }
   });
 });

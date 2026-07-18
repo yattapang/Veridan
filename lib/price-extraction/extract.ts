@@ -5,10 +5,13 @@ import {
   EXTRACTION_MODEL,
   buildExtractionSystemPrompt,
   buildExtractionUserText,
+  checkExtractionStartAllowed,
   classifyExtractionFile,
   parseExtraction,
+  staleExtractionCutoffIso,
   type ExtractedLineItem,
 } from "./extraction-core";
+import type { ExtractionStatus } from "@/lib/supabase/types";
 import {
   fuzzySupplierMatch,
   matchExtractedLine,
@@ -45,6 +48,8 @@ interface PriceFileUploadRow {
   supplier_id: string | null;
   file_storage_path: string;
   original_filename: string | null;
+  extraction_status: ExtractionStatus;
+  updated_at: string;
 }
 
 /** Reads extraction_confidence_threshold from business_parameters (Task 35 seed). */
@@ -90,19 +95,46 @@ export async function runExtraction(
   // 1. Load the upload.
   const { data: upload, error: loadError } = await supabase
     .from("price_file_uploads")
-    .select("id, supplier_id, file_storage_path, original_filename")
+    .select("id, supplier_id, file_storage_path, original_filename, extraction_status, updated_at")
     .eq("id", uploadId)
     .maybeSingle<PriceFileUploadRow>();
 
   if (loadError) return { ok: false, error: `Could not load the upload: ${loadError.message}` };
   if (!upload) return { ok: false, error: "Upload not found." };
 
-  // 2. Mark extracting, clear any prior error, and remove any prior rows so a
-  //    re-run (after a failure) doesn't duplicate line items.
-  await supabase
+  // 2. Status gate (review finding MAJOR-3): running extraction deletes and
+  //    re-creates every extracted_prices row, so refuse unless the upload is
+  //    'pending'/'failed' — or wedged in 'extracting' past the staleness
+  //    window (MAJOR-4 retry). Never on 'review'/'completed', where a re-run
+  //    would destroy the founders' accept/reject work.
+  const nowMs = Date.now();
+  const gate = checkExtractionStartAllowed(upload.extraction_status, upload.updated_at, nowMs);
+  if (!gate.ok) return { ok: false, error: gate.error };
+
+  //    Claim the run with a CONDITIONAL status flip so two concurrent POSTs
+  //    can't both proceed: only the request whose update actually matches
+  //    the allowed prior state wins; the loser gets zero rows back. The
+  //    stale-retry claim additionally requires updated_at to still be older
+  //    than the cutoff (set_updated_at bumps it when a run is claimed).
+  let claimQuery = supabase
     .from("price_file_uploads")
     .update({ extraction_status: "extracting", error_message: null })
     .eq("id", uploadId);
+  claimQuery = gate.retryOfStale
+    ? claimQuery.eq("extraction_status", "extracting").lt("updated_at", staleExtractionCutoffIso(nowMs))
+    : claimQuery.in("extraction_status", ["pending", "failed"]);
+  const { data: claimedRows, error: claimError } = await claimQuery.select("id");
+  if (claimError) return { ok: false, error: `Could not start extraction: ${claimError.message}` };
+  if (!claimedRows || claimedRows.length === 0) {
+    return {
+      ok: false,
+      error: "Another extraction just started for this upload — reload the page to see its progress.",
+    };
+  }
+
+  //    Remove any prior rows so a re-run (after a failure or stalled run)
+  //    doesn't duplicate line items. Safe here: the gate above guarantees no
+  //    reviewed/accepted rows exist (those states are review/completed).
   await supabase.from("extracted_prices").delete().eq("price_file_upload_id", uploadId);
 
   try {

@@ -7,7 +7,9 @@ import {
   confidencePercentLabel,
   confidenceTier,
   formatRawExtractedText,
+  isCrossSupplierProductMatch,
   isResolvedStatus,
+  isValidAcceptQty,
   resolveAcceptedStatus,
   selectBulkAcceptableRowIds,
 } from "./review";
@@ -92,7 +94,28 @@ describe("checkAcceptAllowed", () => {
   });
 });
 
+describe("isCrossSupplierProductMatch", () => {
+  it("false when the product belongs to the upload's supplier", () => {
+    expect(isCrossSupplierProductMatch("s1", "s1")).toBe(false);
+  });
+  it("true when the product belongs to a different supplier", () => {
+    expect(isCrossSupplierProductMatch("s2", "s1")).toBe(true);
+  });
+  it("true when the product has no supplier (not this supplier's row to overwrite)", () => {
+    expect(isCrossSupplierProductMatch(null, "s1")).toBe(true);
+  });
+  it("false when the upload has no supplier yet (the accept gate blocks earlier)", () => {
+    expect(isCrossSupplierProductMatch("s2", null)).toBe(false);
+  });
+});
+
 describe("selectBulkAcceptableRowIds", () => {
+  const supplierByProduct = new Map<string, string | null>([
+    ["p1", "s1"],
+    ["p3", "s1"],
+    ["p4", "s1"],
+  ]);
+
   it("only includes confident rows with an existing matched product", () => {
     const rows = [
       { id: "r1", review_status: "confident" as const, matched_product_id: "p1" },
@@ -100,7 +123,45 @@ describe("selectBulkAcceptableRowIds", () => {
       { id: "r3", review_status: "needs_review" as const, matched_product_id: "p3" },
       { id: "r4", review_status: "accepted" as const, matched_product_id: "p4" }, // already resolved
     ];
-    expect(selectBulkAcceptableRowIds(rows)).toEqual(["r1"]);
+    expect(selectBulkAcceptableRowIds(rows, "s1", supplierByProduct)).toEqual(["r1"]);
+  });
+
+  it("excludes rows whose matched product belongs to a different supplier (MAJOR-5)", () => {
+    const rows = [
+      { id: "r1", review_status: "confident" as const, matched_product_id: "p1" }, // same supplier
+      { id: "r2", review_status: "confident" as const, matched_product_id: "p2" }, // other supplier
+    ];
+    const map = new Map<string, string | null>([
+      ["p1", "s1"],
+      ["p2", "s2"],
+    ]);
+    expect(selectBulkAcceptableRowIds(rows, "s1", map)).toEqual(["r1"]);
+  });
+
+  it("excludes a matched product with no supplier — never silently repriced in bulk", () => {
+    const rows = [{ id: "r1", review_status: "confident" as const, matched_product_id: "p1" }];
+    const map = new Map<string, string | null>([["p1", null]]);
+    expect(selectBulkAcceptableRowIds(rows, "s1", map)).toEqual([]);
+  });
+
+  it("excludes a matched product missing from the supplier lookup (defensive)", () => {
+    const rows = [{ id: "r1", review_status: "confident" as const, matched_product_id: "p-unknown" }];
+    expect(selectBulkAcceptableRowIds(rows, "s1", supplierByProduct)).toEqual([]);
+  });
+});
+
+describe("isValidAcceptQty", () => {
+  it("accepts finite quantities greater than zero", () => {
+    expect(isValidAcceptQty(1)).toBe(true);
+    expect(isValidAcceptQty(0.5)).toBe(true);
+    expect(isValidAcceptQty(250)).toBe(true);
+  });
+  it("rejects zero, negatives, non-finite, and null", () => {
+    expect(isValidAcceptQty(0)).toBe(false);
+    expect(isValidAcceptQty(-3)).toBe(false);
+    expect(isValidAcceptQty(Number.NaN)).toBe(false);
+    expect(isValidAcceptQty(Number.POSITIVE_INFINITY)).toBe(false);
+    expect(isValidAcceptQty(null)).toBe(false);
   });
 });
 

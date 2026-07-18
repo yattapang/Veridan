@@ -17,9 +17,13 @@ import {
   checkAcceptAllowed,
   classifyMatchKind,
   computeUploadProgress,
+  isCrossSupplierProductMatch,
+  isResolvedStatus,
+  isValidAcceptQty,
   resolveAcceptedStatus,
   selectBulkAcceptableRowIds,
   type ProposedValues,
+  type ReviewMatchKind,
 } from "@/lib/price-extraction/review";
 import { createLineItemQuoteRecord } from "@/app/admin/projects/[id]/actions";
 import { ensureOriginForSupplier, recomputeQuote, regroupLineItemOrigins } from "@/lib/quotes/persist";
@@ -127,11 +131,42 @@ export async function setUploadSupplier(
   const supplierId = String(formData.get("supplier_id") ?? "").trim();
   if (!supplierId) return { ok: false, error: "Choose a supplier." };
 
-  const { error } = await supabase
+  // Review finding MINOR-2: once a supplier is set — and especially once any
+  // row has been resolved against it (library writes carry that supplier) —
+  // silently swapping the supplier from a stale form would corrupt
+  // provenance. Refuse server-side rather than trusting the client gate.
+  const loadedUpload = await loadUpload(supabase, uploadId);
+  if ("error" in loadedUpload) return { ok: false, error: loadedUpload.error };
+  if (loadedUpload.upload.supplier_id) {
+    return { ok: false, error: "This upload already has a supplier set — reload the page to see it." };
+  }
+  const { data: statusRows, error: statusError } = await supabase
+    .from("extracted_prices")
+    .select("review_status")
+    .eq("price_file_upload_id", uploadId);
+  if (statusError) return { ok: false, error: `Could not check the upload's rows: ${statusError.message}` };
+  const anyResolved = ((statusRows as { review_status: ExtractedPriceRow["review_status"] }[] | null) ?? []).some(
+    (r) => isResolvedStatus(r.review_status)
+  );
+  if (anyResolved) {
+    return {
+      ok: false,
+      error: "Rows on this upload have already been resolved — the supplier can no longer be changed.",
+    };
+  }
+
+  // Conditional write: only fills a still-NULL supplier, so a concurrent
+  // submit can't overwrite one that just landed.
+  const { data: updated, error } = await supabase
     .from("price_file_uploads")
     .update({ supplier_id: supplierId })
-    .eq("id", uploadId);
+    .eq("id", uploadId)
+    .is("supplier_id", null)
+    .select("id");
   if (error) return { ok: false, error: `Could not set the supplier: ${error.message}` };
+  if (!updated || updated.length === 0) {
+    return { ok: false, error: "This upload already has a supplier set — reload the page to see it." };
+  }
 
   revalidateReview(uploadId);
   return { ok: true };
@@ -162,6 +197,28 @@ async function applyLibraryUpdate(
   let productId = args.existingProductId;
 
   if (args.matchKind === "existing_product" && productId) {
+    // Review finding MAJOR-5: never overwrite ANOTHER supplier's library row.
+    // The update below writes unit_cost/cost_currency in place, so the
+    // matched product must belong to this upload's supplier. Cross-supplier
+    // matches are handled per-row via the item_group flow (a new offering
+    // row for THIS supplier) — acceptExtractedRow reroutes them before it
+    // gets here; this is the defense-in-depth backstop.
+    const { data: product, error: productLoadError } = await supabase
+      .from("products")
+      .select("id, supplier_id")
+      .eq("id", productId)
+      .maybeSingle<{ id: string; supplier_id: string | null }>();
+    if (productLoadError) {
+      return { productId: "", error: `Could not load the matched product: ${productLoadError.message}` };
+    }
+    if (!product) return { productId: "", error: "The matched product no longer exists." };
+    if (product.supplier_id !== args.supplierId) {
+      return {
+        productId: "",
+        error:
+          "This line matched a product that belongs to a different supplier — accepting it in place would overwrite that supplier's price. Accept the row individually to create this supplier's own offering instead.",
+      };
+    }
     const { error } = await supabase
       .from("products")
       .update({
@@ -245,7 +302,38 @@ export async function acceptExtractedRow(
   if (rowError) return { ok: false, error: `Could not load the row: ${rowError.message}` };
   if (!row) return { ok: false, error: "Row not found." };
 
-  const matchKind = classifyMatchKind(row);
+  // Review finding MAJOR-2: refuse to act on an already-resolved row — a
+  // double-accept would duplicate product_price_history and re-overwrite
+  // the library; an accept after a reject would corrupt the audit trail.
+  if (isResolvedStatus(row.review_status)) {
+    return { ok: false, error: "This row is already resolved — reload the page to see its current state." };
+  }
+
+  let matchKind: ReviewMatchKind = classifyMatchKind(row);
+  let existingProductId = row.matched_product_id;
+  let crossSupplierGroupId: string | null = null;
+
+  // Review finding MAJOR-5: when the matched product belongs to a DIFFERENT
+  // supplier, accepting must not overwrite that supplier's library row.
+  // Reroute through the item_group flow instead — creating THIS supplier's
+  // own offering, pre-grouped with the matched product's family when it has
+  // one — per the existing cross-supplier (item_group) pattern.
+  if (matchKind === "existing_product" && row.matched_product_id) {
+    const { data: matchedProduct, error: productError } = await supabase
+      .from("products")
+      .select("id, supplier_id, item_group_id")
+      .eq("id", row.matched_product_id)
+      .maybeSingle<{ id: string; supplier_id: string | null; item_group_id: string | null }>();
+    if (productError) {
+      return { ok: false, error: `Could not load the matched product: ${productError.message}` };
+    }
+    if (!matchedProduct) return { ok: false, error: "The matched product no longer exists." };
+    if (isCrossSupplierProductMatch(matchedProduct.supplier_id, upload.supplier_id)) {
+      matchKind = "item_group";
+      existingProductId = null;
+      crossSupplierGroupId = matchedProduct.item_group_id;
+    }
+  }
 
   const categoryRaw = formData.get("generic_category");
   const category = isProductCategory(categoryRaw) ? categoryRaw : null;
@@ -268,6 +356,11 @@ export async function acceptExtractedRow(
   if (!currency) return { ok: false, error: "Choose a currency." };
   const qtyRaw = formData.get("qty");
   const qty = qtyRaw !== null && qtyRaw !== "" ? Number(qtyRaw) : row.proposed_qty;
+  // Review finding MINOR-1: validate qty like unit cost — finite and > 0 —
+  // rather than storing garbage for the seed-quote path to silently coerce.
+  if (!isValidAcceptQty(qty)) {
+    return { ok: false, error: "Enter a valid quantity (a number greater than zero)." };
+  }
 
   const original: ProposedValues = {
     description: row.proposed_description,
@@ -278,11 +371,37 @@ export async function acceptExtractedRow(
   const submitted: ProposedValues = { description, unitCost, currency, qty };
   const status = resolveAcceptedStatus(original, submitted);
 
-  const itemGroupId = String(formData.get("item_group_id") ?? "").trim() || row.item_group_match_id;
+  const itemGroupId =
+    String(formData.get("item_group_id") ?? "").trim() || crossSupplierGroupId || row.item_group_match_id;
+
+  // Review finding MAJOR-2: claim the row FIRST with a conditional status
+  // flip — only an unresolved row can transition, so of two concurrent
+  // accepts (or an accept racing a reject) exactly one wins; the loser's
+  // update matches zero rows and NO library/history write happens for it.
+  const nowIso = new Date().toISOString();
+  const { data: claimedRows, error: claimError } = await supabase
+    .from("extracted_prices")
+    .update({
+      proposed_description: description,
+      proposed_unit_cost: unitCost,
+      proposed_currency: currency,
+      proposed_qty: qty,
+      review_status: status,
+      reviewed_by: user.id,
+      reviewed_at: nowIso,
+      applied_at: nowIso,
+    })
+    .eq("id", rowId)
+    .in("review_status", ["confident", "needs_review"])
+    .select("id");
+  if (claimError) return { ok: false, error: `Could not mark the row resolved: ${claimError.message}` };
+  if (!claimedRows || claimedRows.length === 0) {
+    return { ok: false, error: "This row was already resolved (perhaps in another tab) — nothing was applied again." };
+  }
 
   const { productId, error: applyError } = await applyLibraryUpdate(supabase, {
     matchKind,
-    existingProductId: row.matched_product_id,
+    existingProductId,
     itemGroupId: matchKind === "existing_product" ? null : itemGroupId,
     uploadId,
     supplierId: upload.supplier_id as string,
@@ -293,23 +412,28 @@ export async function acceptExtractedRow(
     category,
     userId: user.id,
   });
-  if (applyError) return { ok: false, error: applyError };
+  if (applyError) {
+    // The library write failed after the row was claimed — release the claim
+    // (best-effort) so the founder can fix the problem and accept again.
+    await supabase
+      .from("extracted_prices")
+      .update({
+        review_status: row.review_status,
+        reviewed_by: row.reviewed_by,
+        reviewed_at: row.reviewed_at,
+        applied_at: null,
+      })
+      .eq("id", rowId);
+    return { ok: false, error: applyError };
+  }
 
+  // Record the resolved product on the row (for the cross-supplier/item-group
+  // paths this is the newly created offering, not the other supplier's row).
   const { error: updateError } = await supabase
     .from("extracted_prices")
-    .update({
-      matched_product_id: productId,
-      proposed_description: description,
-      proposed_unit_cost: unitCost,
-      proposed_currency: currency,
-      proposed_qty: qty,
-      review_status: status,
-      reviewed_by: user.id,
-      reviewed_at: new Date().toISOString(),
-      applied_at: new Date().toISOString(),
-    })
+    .update({ matched_product_id: productId })
     .eq("id", rowId);
-  if (updateError) return { ok: false, error: `Row saved to the library but could not be marked resolved: ${updateError.message}` };
+  if (updateError) return { ok: false, error: `Row saved to the library but could not record its product: ${updateError.message}` };
 
   await refreshUploadCompletion(supabase, uploadId);
   revalidateReview(uploadId);
@@ -327,12 +451,34 @@ export async function rejectExtractedRow(uploadId: string, rowId: string): Promi
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to reject a row." };
 
-  const { error } = await supabase
+  // Review finding MAJOR-2: refuse when already resolved — rejecting a row
+  // AFTER it was accepted would flip the audit trail to "rejected" while the
+  // library/history writes it triggered remain in place.
+  const { data: row, error: rowError } = await supabase
+    .from("extracted_prices")
+    .select("id, review_status")
+    .eq("id", rowId)
+    .eq("price_file_upload_id", uploadId)
+    .maybeSingle<{ id: string; review_status: ExtractedPriceRow["review_status"] }>();
+  if (rowError) return { ok: false, error: `Could not load the row: ${rowError.message}` };
+  if (!row) return { ok: false, error: "Row not found." };
+  if (isResolvedStatus(row.review_status)) {
+    return { ok: false, error: "This row is already resolved — reload the page to see its current state." };
+  }
+
+  // Conditional flip: only an unresolved row can transition to rejected, so
+  // a reject racing an accept in another tab can't clobber the accepted state.
+  const { data: rejected, error } = await supabase
     .from("extracted_prices")
     .update({ review_status: "rejected", reviewed_by: user.id, reviewed_at: new Date().toISOString() })
     .eq("id", rowId)
-    .eq("price_file_upload_id", uploadId);
+    .eq("price_file_upload_id", uploadId)
+    .in("review_status", ["confident", "needs_review"])
+    .select("id");
   if (error) return { ok: false, error: `Could not reject the row: ${error.message}` };
+  if (!rejected || rejected.length === 0) {
+    return { ok: false, error: "This row was already resolved (perhaps in another tab) — nothing was changed." };
+  }
 
   await refreshUploadCompletion(supabase, uploadId);
   revalidateReview(uploadId);
@@ -367,12 +513,55 @@ export async function acceptAllConfident(uploadId: string): Promise<ReviewAction
   if (rowsError) return { ok: false, error: `Could not load rows: ${rowsError.message}` };
 
   const candidates = (rows as ExtractedPriceRow[]) ?? [];
-  const acceptableIds = new Set(selectBulkAcceptableRowIds(candidates));
+
+  // Review finding MAJOR-5: the bulk selection excludes rows whose matched
+  // product belongs to a different supplier than the upload — they stay in
+  // the table for per-row review (with the supplier visibly shown) instead
+  // of being silently repriced across suppliers.
+  const candidateProductIds = [
+    ...new Set(candidates.map((r) => r.matched_product_id).filter((v): v is string => Boolean(v))),
+  ];
+  const productSupplierById = new Map<string, string | null>();
+  if (candidateProductIds.length > 0) {
+    const { data: products, error: productsError } = await supabase
+      .from("products")
+      .select("id, supplier_id")
+      .in("id", candidateProductIds);
+    if (productsError) {
+      return { ok: false, error: `Could not load the matched products: ${productsError.message}` };
+    }
+    for (const p of (products as { id: string; supplier_id: string | null }[]) ?? []) {
+      productSupplierById.set(p.id, p.supplier_id);
+    }
+  }
+
+  const acceptableIds = new Set(selectBulkAcceptableRowIds(candidates, upload.supplier_id, productSupplierById));
   const targets = candidates.filter((r) => acceptableIds.has(r.id));
 
   const errors: string[] = [];
   for (const row of targets) {
     if (!row.matched_product_id || row.proposed_unit_cost === null || !row.proposed_currency) continue;
+    // Same conditional claim as the per-row accept (MAJOR-2): only an
+    // unresolved row transitions, so a concurrent bulk accept (or a per-row
+    // action racing this loop) can't double-write history for the same row.
+    const nowIso = new Date().toISOString();
+    const { data: claimedRows, error: claimError } = await supabase
+      .from("extracted_prices")
+      .update({
+        review_status: "accepted",
+        reviewed_by: user.id,
+        reviewed_at: nowIso,
+        applied_at: nowIso,
+      })
+      .eq("id", row.id)
+      .in("review_status", ["confident", "needs_review"])
+      .select("id");
+    if (claimError) {
+      errors.push(claimError.message);
+      continue;
+    }
+    if (!claimedRows || claimedRows.length === 0) continue; // already resolved elsewhere — skip silently
+
     const { error: applyError } = await applyLibraryUpdate(supabase, {
       matchKind: "existing_product",
       existingProductId: row.matched_product_id,
@@ -387,18 +576,13 @@ export async function acceptAllConfident(uploadId: string): Promise<ReviewAction
       userId: user.id,
     });
     if (applyError) {
+      // Release the claim (best-effort) so the row stays reviewable.
+      await supabase
+        .from("extracted_prices")
+        .update({ review_status: row.review_status, reviewed_by: row.reviewed_by, reviewed_at: row.reviewed_at, applied_at: null })
+        .eq("id", row.id);
       errors.push(applyError);
-      continue;
     }
-    await supabase
-      .from("extracted_prices")
-      .update({
-        review_status: "accepted",
-        reviewed_by: user.id,
-        reviewed_at: new Date().toISOString(),
-        applied_at: new Date().toISOString(),
-      })
-      .eq("id", row.id);
   }
 
   await refreshUploadCompletion(supabase, uploadId);

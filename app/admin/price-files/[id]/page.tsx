@@ -5,6 +5,7 @@ import type { PriceFileUploadWithDetails } from "@/lib/supabase/types";
 import { InstructiveMessage } from "@/components/admin/InstructiveMessage";
 import { signPriceFileUrl, fileNameFromPath } from "@/lib/storage";
 import { extractionStatusBadgeClass, extractionStatusLabel } from "@/lib/price-files";
+import { STALE_EXTRACTION_MINUTES, isExtractionStale } from "@/lib/price-extraction/extraction-core";
 import { RunExtractionButton } from "./RunExtractionButton";
 
 export async function generateMetadata({
@@ -119,9 +120,21 @@ export default async function PriceFileDetailPage({
     // Non-fatal — the page still renders without the counts.
   }
 
+  // A run wedged in 'extracting' past the staleness window (e.g. the
+  // serverless function was killed mid-run) gets a retry button rather than
+  // being stuck forever (review finding MAJOR-4). The server side enforces
+  // the same window, so a fresh run can't be stomped from a stale tab.
+  const isStalledExtraction =
+    upload.extraction_status === "extracting" && isExtractionStale(upload.updated_at);
   const canRunExtraction =
-    upload.extraction_status === "pending" || upload.extraction_status === "failed";
-  const runLabel = upload.extraction_status === "failed" ? "Retry extraction" : "Run extraction";
+    upload.extraction_status === "pending" ||
+    upload.extraction_status === "failed" ||
+    isStalledExtraction;
+  const runLabel = isStalledExtraction
+    ? "Retry stalled extraction"
+    : upload.extraction_status === "failed"
+      ? "Retry extraction"
+      : "Run extraction";
 
   return (
     <div className="max-w-3xl">
@@ -191,12 +204,18 @@ export default async function PriceFileDetailPage({
           Extraction
         </h2>
 
-        {upload.extraction_status === "extracting" && (
-          <p className="text-sm text-veridan-warm-gray">
-            Extraction is running — Claude is reading the file and matching line items against the
-            Hardware Library. Reload this page in a moment to see the result.
-          </p>
-        )}
+        {upload.extraction_status === "extracting" &&
+          (isStalledExtraction ? (
+            <p className="mb-4 text-sm text-amber-700">
+              This extraction has been running for more than {STALE_EXTRACTION_MINUTES} minutes and
+              looks stalled — the run may have been cut off. You can retry it below.
+            </p>
+          ) : (
+            <p className="text-sm text-veridan-warm-gray">
+              Extraction is running — Claude is reading the file and matching line items against the
+              Hardware Library. Reload this page in a moment to see the result.
+            </p>
+          ))}
 
         {upload.extraction_status === "failed" && (
           <p className="mb-4 text-sm text-red-600">

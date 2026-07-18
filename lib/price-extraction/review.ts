@@ -119,6 +119,21 @@ export function checkAcceptAllowed(input: AcceptGateInput): AcceptGateResult {
   return { ok: true };
 }
 
+/**
+ * True when a matched library product belongs to a different supplier than
+ * the upload (review finding MAJOR-5): accepting such a match as an in-place
+ * update would silently reprice ANOTHER supplier's row. Strict inequality on
+ * purpose — a product with no supplier is also not this supplier's row to
+ * overwrite (the founder instead accepts per-row, creating THIS supplier's
+ * own offering via the item-group flow).
+ */
+export function isCrossSupplierProductMatch(
+  productSupplierId: string | null,
+  uploadSupplierId: string | null
+): boolean {
+  return uploadSupplierId !== null && productSupplierId !== uploadSupplierId;
+}
+
 /** Rows eligible for the "Accept all confident" bulk action: confident and not yet resolved. */
 export interface BulkAcceptableRow {
   id: string;
@@ -132,10 +147,26 @@ export interface BulkAcceptableRow {
  * never silently create new products or item-group offerings without the
  * founder looking at the minimal-details step, so item_group/new_item rows
  * are excluded even when confident and must be accepted one at a time.
+ *
+ * Review finding MAJOR-5: rows whose matched product belongs to a DIFFERENT
+ * supplier than the upload are also excluded — bulk-accepting them would
+ * silently reprice the other supplier's library row. They stay in the table
+ * for per-row review (where the matched product's supplier is visible).
+ * A matched product missing from `productSupplierById` is excluded too,
+ * defensively — no supplier check possible means no silent overwrite.
  */
-export function selectBulkAcceptableRowIds(rows: BulkAcceptableRow[]): string[] {
+export function selectBulkAcceptableRowIds(
+  rows: BulkAcceptableRow[],
+  uploadSupplierId: string | null,
+  productSupplierById: ReadonlyMap<string, string | null>
+): string[] {
   return rows
-    .filter((r) => r.review_status === "confident" && Boolean(r.matched_product_id))
+    .filter((r) => {
+      if (r.review_status !== "confident" || !r.matched_product_id) return false;
+      if (!productSupplierById.has(r.matched_product_id)) return false;
+      const productSupplierId = productSupplierById.get(r.matched_product_id) ?? null;
+      return !isCrossSupplierProductMatch(productSupplierId, uploadSupplierId);
+    })
     .map((r) => r.id);
 }
 
@@ -148,6 +179,15 @@ export interface ProposedValues {
   unitCost: number | null;
   currency: CurrencyCode | null;
   qty: number | null;
+}
+
+/**
+ * Server-side qty validation for an accept (review finding MINOR-1), the
+ * same shape as the unit-cost check: a quantity must be a finite number
+ * greater than zero to be stored on an accepted row.
+ */
+export function isValidAcceptQty(qty: number | null): boolean {
+  return qty !== null && Number.isFinite(qty) && qty > 0;
 }
 
 /** accepted → status stays 'accepted'; any field changed → 'edited' (Plan §2.2 Stage 3). */
@@ -185,12 +225,17 @@ export interface SeedQuoteLineDraft {
 
 /**
  * Maps accepted/edited extracted_prices rows to quote_line_items insert
- * drafts (Task 41): product_id from the (by now resolved) match, qty from
- * proposed_qty defaulting to 1 when absent/non-positive, unit_cost/currency
- * from the accepted values verbatim — no calculation, no FX, no margin.
- * Rows without a resolved product_id are skipped (shouldn't happen for
- * accepted rows — accept always resolves a product — but defensive rather
- * than inserting a broken quote line).
+ * drafts (Task 41): product_id from the (by now resolved) match,
+ * unit_cost/currency from the accepted values verbatim — no calculation, no
+ * FX, no margin. Rows without a resolved product_id are skipped (shouldn't
+ * happen for accepted rows — accept always resolves a product — but
+ * defensive rather than inserting a broken quote line).
+ *
+ * Qty: per-row accept now validates qty server-side (isValidAcceptQty,
+ * review finding MINOR-1), so an invalid stored qty should be unreachable
+ * from that path. The default-to-1 below remains only for rows bulk-accepted
+ * with no extracted qty (proposed_qty null) and as a defensive last resort —
+ * it is no longer a silent coercion of founder-entered values.
  */
 export function buildSeedQuoteLineDrafts(
   rows: AcceptedRowForSeed[],
