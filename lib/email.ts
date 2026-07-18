@@ -1,6 +1,7 @@
 import "server-only";
 import { Resend } from "resend";
 import { enquiryNotificationRecipients, siteMeta } from "@/lib/site-content";
+import { formatInvoiceJmd } from "@/lib/invoice-pdf/format";
 
 /**
  * Best-effort transactional email via Resend. Per Task 8 build plan
@@ -142,6 +143,72 @@ export async function sendQuoteEmail(
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error sending email.";
     console.error("[veridan:email] Failed to send quote email:", err);
+    return { ok: false, error: message };
+  }
+}
+
+export interface InvoiceEmailInput {
+  to: string;
+  invoiceNumber: string;
+  projectName: string;
+  amountJmd: number;
+  dueNote: string | null;
+  quoteRef: string | null;
+  pdfBuffer: Buffer;
+}
+
+/**
+ * Sends the client-facing invoice email with the PDF attached (Task 48c send
+ * flow — mirrors sendQuoteEmail's contract exactly). Does NOT swallow its
+ * own failure: a failed send must be surfaced to the caller
+ * (app/admin/invoices/[id]/actions.ts sendInvoice) so the invoice's status
+ * stays 'issued' and nothing beyond the harmless, overwrite-on-retry
+ * Storage upload persists.
+ */
+export async function sendInvoiceEmail(
+  input: InvoiceEmailInput
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const resend = getResendClient();
+  if (!resend) {
+    return { ok: false, error: "RESEND_API_KEY is not configured — cannot send this invoice." };
+  }
+
+  const text = [
+    `Please find attached invoice ${input.invoiceNumber} for ${input.projectName}.`,
+    "",
+    `Amount due: ${formatInvoiceJmd(input.amountJmd)}.`,
+    input.dueNote ? input.dueNote : null,
+    input.quoteRef ? `Reference quote: ${input.quoteRef}.` : null,
+    "",
+    "Please reach out with any questions.",
+  ].filter((l): l is string => l !== null);
+
+  try {
+    const { error } = await resend.emails.send({
+      // Domain verified in Resend 2026-07-16; sender confirmed by founders,
+      // same address the quote send flow uses.
+      from: "Veridan Limited <quotes@veridanlimited.com>",
+      replyTo: "quotes@veridanlimited.com",
+      to: [input.to],
+      subject: `Veridan invoice ${input.invoiceNumber} — ${input.projectName}`,
+      text: text.join("\n"),
+      attachments: [
+        {
+          filename: `${input.invoiceNumber}.pdf`,
+          content: input.pdfBuffer,
+        },
+      ],
+    });
+
+    if (error) {
+      console.error("[veridan:email] Resend returned an error sending an invoice:", error);
+      return { ok: false, error: error.message };
+    }
+
+    return { ok: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error sending email.";
+    console.error("[veridan:email] Failed to send invoice email:", err);
     return { ok: false, error: message };
   }
 }

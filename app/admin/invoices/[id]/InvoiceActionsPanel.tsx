@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useActionState, useState, useTransition } from "react";
 import type { InvoiceStatus } from "@/lib/supabase/types";
-import { issueInvoice, voidInvoice, type InvoiceActionResult } from "./actions";
+import { issueInvoice, sendInvoice, voidInvoice, type InvoiceActionResult } from "./actions";
+
+const initialResult: InvoiceActionResult = { ok: true };
 
 const buttonClass =
   "rounded-md border border-veridan-warm-gray-light px-4 py-2 text-xs font-medium uppercase tracking-wide text-veridan-ink transition-opacity duration-150 hover:opacity-80 disabled:opacity-50";
@@ -10,8 +12,11 @@ const primaryButtonClass =
   "rounded-md bg-veridan-ink px-4 py-2 text-xs font-medium uppercase tracking-wide text-veridan-paper transition-opacity duration-150 hover:opacity-90 disabled:opacity-50";
 const dangerButtonClass =
   "rounded-md border border-red-200 px-4 py-2 text-xs font-medium uppercase tracking-wide text-red-700 transition-opacity duration-150 hover:opacity-80 disabled:opacity-50";
-const disabledPlaceholderClass =
-  "rounded-md border border-dashed border-veridan-warm-gray-light px-4 py-2 text-xs font-medium uppercase tracking-wide text-veridan-warm-gray opacity-60";
+const linkButtonClass =
+  "rounded-md border border-veridan-warm-gray-light px-4 py-2 text-xs font-medium uppercase tracking-wide text-veridan-ink transition-opacity duration-150 hover:opacity-80 inline-block";
+const inputClass =
+  "w-full rounded-md border border-veridan-warm-gray-light bg-white px-3 py-2 text-sm text-veridan-ink focus:border-veridan-accent focus:outline-none";
+const labelClass = "block text-xs font-medium uppercase tracking-wide text-veridan-warm-gray";
 
 function ActionButton({
   label,
@@ -54,37 +59,81 @@ function ActionButton({
   );
 }
 
-export function InvoiceActionsPanel({ invoiceId, status }: { invoiceId: string; status: InvoiceStatus }) {
+export function InvoiceActionsPanel({
+  invoiceId,
+  status,
+  defaultRecipientEmail,
+  sentPdfUrl,
+}: {
+  invoiceId: string;
+  status: InvoiceStatus;
+  defaultRecipientEmail: string | null;
+  sentPdfUrl: string | null;
+}) {
   const canIssue = status === "draft";
   const canVoid = status === "draft" || status === "issued" || status === "sent";
+  const canSend = status === "issued";
+
+  const [sendState, sendAction, sendPending] = useActionState(sendInvoice.bind(null, invoiceId), initialResult);
 
   return (
-    <div className="flex flex-wrap items-center gap-3">
-      {canIssue && (
-        <ActionButton
-          label="Issue"
-          pendingLabel="Issuing…"
-          variant="primary"
-          onRun={() => issueInvoice(invoiceId)}
-        />
-      )}
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        {canIssue && (
+          <ActionButton label="Issue" pendingLabel="Issuing…" variant="primary" onRun={() => issueInvoice(invoiceId)} />
+        )}
 
-      {/* Honest placeholders — PDF rendering and Resend delivery are Task 48, not built here. */}
-      <span title="PDF rendering ships in Task 48" className={disabledPlaceholderClass}>
-        Download PDF (coming soon)
-      </span>
-      <span title="Resend delivery ships in Task 48" className={disabledPlaceholderClass}>
-        Send by email (coming soon)
-      </span>
+        <a href={`/api/invoices/${invoiceId}/pdf`} className={linkButtonClass}>
+          Download PDF
+        </a>
 
-      {canVoid && (
-        <ActionButton
-          label="Void"
-          pendingLabel="Voiding…"
-          variant="danger"
-          confirmMessage="Void this invoice? This cannot be undone, and a voided invoice cannot be edited or paid against."
-          onRun={() => voidInvoice(invoiceId)}
-        />
+        {sentPdfUrl && (
+          <a href={sentPdfUrl} className={linkButtonClass}>
+            Download sent artifact
+          </a>
+        )}
+
+        {canVoid && (
+          <ActionButton
+            label="Void"
+            pendingLabel="Voiding…"
+            variant="danger"
+            confirmMessage="Void this invoice? This cannot be undone, and a voided invoice cannot be edited or paid against."
+            onRun={() => voidInvoice(invoiceId)}
+          />
+        )}
+      </div>
+
+      {canSend && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-4">
+          <p className="mb-3 text-xs text-amber-800">
+            Invoice emails send from <code>quotes@veridanlimited.com</code>. Replies go to the same address.
+          </p>
+          <form action={sendAction} className="flex flex-wrap items-end gap-3">
+            <div className="min-w-[260px] flex-1">
+              <label className={labelClass} htmlFor="recipient_email">
+                Send to
+              </label>
+              <input
+                id="recipient_email"
+                type="email"
+                name="recipient_email"
+                required
+                defaultValue={defaultRecipientEmail ?? ""}
+                placeholder="client@example.com"
+                className={`${inputClass} mt-1`}
+              />
+            </div>
+            <button type="submit" disabled={sendPending} className={primaryButtonClass}>
+              {sendPending ? "Sending…" : "Send invoice"}
+            </button>
+          </form>
+          {sendState.ok === false && (
+            <p role="alert" className="mt-2 text-xs text-red-600">
+              {sendState.error}
+            </p>
+          )}
+        </div>
       )}
     </div>
   );

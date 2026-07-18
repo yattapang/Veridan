@@ -87,6 +87,50 @@ export async function signQuotePdfUrl(
 }
 
 /**
+ * Uploads the immutable "sent" PDF artifact to the private `invoice-pdfs`
+ * bucket (Task 48c send flow, invoices.pdf_storage_path). Path convention:
+ * `<invoice_number>.pdf` — invoice numbers are unique and an invoice is
+ * never revised in place (a correction voids and a new invoice is raised),
+ * so upserting on invoice_number is safe and idempotent for a resend.
+ * Founders are `authenticated`, which has full CRUD on this bucket per
+ * supabase/migrations/20260718000002_invoicing.sql.
+ */
+export async function uploadInvoicePdf(
+  supabase: SupabaseClient,
+  invoiceNumber: string,
+  buffer: Buffer
+): Promise<{ path: string | null; error: string | null }> {
+  const path = `${invoiceNumber}.pdf`;
+  const { error } = await supabase.storage.from("invoice-pdfs").upload(path, buffer, {
+    contentType: "application/pdf",
+    upsert: true,
+  });
+  if (error) return { path: null, error: error.message };
+  return { path, error: null };
+}
+
+/**
+ * Signs a URL for a previously uploaded sent-invoice PDF artifact, for the
+ * invoice detail page's "sent-artifact download link… alongside the live PDF
+ * link" (Task 49). Best-effort, same pattern as signQuotePdfUrl — a failure
+ * to sign yields `null` rather than failing the page render.
+ */
+export async function signInvoicePdfUrl(
+  supabase: SupabaseClient,
+  path: string | null | undefined,
+  expiresInSeconds = 60 * 60
+): Promise<string | null> {
+  if (!path) return null;
+  try {
+    const { data, error } = await supabase.storage.from("invoice-pdfs").createSignedUrl(path, expiresInSeconds);
+    if (error || !data) return null;
+    return data.signedUrl;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Uploads a supplier price file to the private `price-files` bucket (Task
  * 36, Plan §2.2 Stage 1). Path convention: `<uuid>/<original-filename>` per
  * the Task 36 brief — `uploadId` is the `price_file_uploads.id` generated

@@ -207,3 +207,16 @@ export const quoteRequestRoutes = {
   newConstruction: "/quote-request/new-construction",
   retrofit: "/quote-request/retrofit",
 } as const;
+
+// TODO founder: real bank details. Placeholder text only — every field below
+// is honestly labeled as a placeholder on the invoice PDF itself (Task 48a)
+// rather than showing a fabricated account number. Replace with Veridan's
+// actual receiving-bank details before an invoice is sent to a real client.
+export const invoicePaymentInstructions = {
+  bankName: "TODO founder: bank name",
+  accountName: "Veridan Limited",
+  accountNumber: "TODO founder: account number",
+  branch: "TODO founder: branch",
+  routingOrSwift: "TODO founder: routing / SWIFT code",
+  note: "Bank details above are placeholders — founders to confirm real payment instructions before this invoice is sent to a client.",
+} as const;

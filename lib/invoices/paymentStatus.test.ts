@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { nextInvoiceStatusAfterPayment, sumPayments } from "./paymentStatus";
+import {
+  computeRemainingBalanceJmd,
+  nextInvoiceStatusAfterPayment,
+  paymentExceedsRemainingBalance,
+  sumPayments,
+} from "./paymentStatus";
 
 describe("nextInvoiceStatusAfterPayment", () => {
   it("returns partially_paid when the total paid is less than the amount due", () => {
@@ -34,5 +39,41 @@ describe("sumPayments", () => {
 
   it("returns 0 for an empty list", () => {
     expect(sumPayments([])).toBe(0);
+  });
+});
+
+describe("computeRemainingBalanceJmd", () => {
+  it("returns amount due minus payments recorded so far", () => {
+    expect(computeRemainingBalanceJmd(69000, 30000)).toBe(39000);
+  });
+
+  it("clamps at 0 on a harmless overpayment", () => {
+    expect(computeRemainingBalanceJmd(69000, 69500)).toBe(0);
+  });
+
+  it("returns the full amount when nothing has been paid", () => {
+    expect(computeRemainingBalanceJmd(69000, 0)).toBe(69000);
+  });
+
+  it("compares at cent precision so float drift doesn't misclassify an exact match", () => {
+    expect(computeRemainingBalanceJmd(0.3, 0.1 + 0.2)).toBe(0);
+  });
+});
+
+describe("paymentExceedsRemainingBalance", () => {
+  it("returns true when a new payment would exceed the remaining balance", () => {
+    expect(paymentExceedsRemainingBalance(40000, 39000)).toBe(true);
+  });
+
+  it("returns false when a new payment exactly matches the remaining balance", () => {
+    expect(paymentExceedsRemainingBalance(39000, 39000)).toBe(false);
+  });
+
+  it("returns false when a new payment is under the remaining balance", () => {
+    expect(paymentExceedsRemainingBalance(10000, 39000)).toBe(false);
+  });
+
+  it("compares at cent precision so float drift doesn't false-positive", () => {
+    expect(paymentExceedsRemainingBalance(0.3, 0.1 + 0.2)).toBe(false);
   });
 });

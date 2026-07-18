@@ -33,3 +33,26 @@ export function nextInvoiceStatusAfterPayment(
 export function sumPayments(amounts: Array<number | null | undefined>): number {
   return amounts.reduce((sum: number, a) => sum + (typeof a === "number" && Number.isFinite(a) ? a : 0), 0);
 }
+
+/**
+ * Remaining balance (JMD) = amount due minus payments recorded so far,
+ * clamped at 0 (a harmless overpayment never shows as a negative balance).
+ * Task 49's "remaining-balance display" helper — the invoice detail page and
+ * payment-history running-balance column both call this rather than
+ * re-deriving the subtraction inline.
+ */
+export function computeRemainingBalanceJmd(amountJmd: number, totalPaidSoFarJmd: number): number {
+  const remainingCents = toCents(amountJmd) - toCents(totalPaidSoFarJmd);
+  return remainingCents > 0 ? remainingCents / 100 : 0;
+}
+
+/**
+ * True when a NEW payment of `newPaymentJmd` would exceed the invoice's
+ * (unclamped) remaining balance — the server-side guard Task 49 requires
+ * before `recordPayment` (app/admin/invoices/[id]/actions.ts) inserts a row.
+ * Compares at cent precision for the same float-drift reason
+ * nextInvoiceStatusAfterPayment does.
+ */
+export function paymentExceedsRemainingBalance(newPaymentJmd: number, remainingJmd: number): boolean {
+  return toCents(newPaymentJmd) > toCents(remainingJmd);
+}

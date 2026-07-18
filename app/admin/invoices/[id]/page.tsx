@@ -4,7 +4,10 @@ import { createClient } from "@/lib/supabase/server";
 import type { InvoicePaymentRow, InvoiceWithRefs } from "@/lib/supabase/types";
 import { InstructiveMessage } from "@/components/admin/InstructiveMessage";
 import { INVOICE_STATUS_BADGE, INVOICE_STATUS_LABELS, INVOICE_TYPE_LABELS } from "@/lib/invoices/format";
+import { computeRemainingBalanceJmd, sumPayments } from "@/lib/invoices/paymentStatus";
 import { formatJmd, formatUsd } from "@/lib/quotes/format";
+import { loadDefaultRecipientEmail } from "@/lib/quotes/persist";
+import { signInvoicePdfUrl } from "@/lib/storage";
 import { InvoiceActionsPanel } from "./InvoiceActionsPanel";
 import { RecordPaymentForm } from "./RecordPaymentForm";
 
@@ -55,16 +58,41 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
   if (!invoiceData) notFound();
   const invoice = invoiceData as unknown as InvoiceWithRefs;
 
-  const { data: paymentsData, error: paymentsError } = await supabase
-    .from("invoice_payments")
-    .select("*")
-    .eq("invoice_id", id)
-    .order("paid_at", { ascending: false });
-  const payments = (paymentsData as InvoicePaymentRow[]) ?? [];
+  // Chronological order (oldest first) so a running balance can be computed
+  // in payment order, then the display list is reversed (most recent on
+  // top) while each row keeps the running-balance value computed here.
+  const [paymentsResult, defaultRecipientEmail, sentPdfUrl] = await Promise.all([
+    supabase
+      .from("invoice_payments")
+      .select("*")
+      .eq("invoice_id", id)
+      .order("paid_at", { ascending: true })
+      .order("created_at", { ascending: true }),
+    invoice.status === "issued" ? loadDefaultRecipientEmail(supabase, invoice.company_id) : Promise.resolve(null),
+    signInvoicePdfUrl(supabase, invoice.pdf_storage_path),
+  ]);
+  const { data: paymentsData, error: paymentsError } = paymentsResult;
+  const paymentsChronological = (paymentsData as InvoicePaymentRow[]) ?? [];
 
   const canRecordPayment = ["issued", "sent", "partially_paid"].includes(invoice.status);
-  const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount_jmd), 0);
-  const balanceRemaining = Math.round((Number(invoice.amount_jmd) - totalPaid) * 100) / 100;
+  const totalPaid = sumPayments(paymentsChronological.map((p) => p.amount_jmd));
+  const balanceRemaining = computeRemainingBalanceJmd(invoice.amount_jmd, totalPaid);
+
+  // Cumulative amount paid as of each payment (chronological order), built
+  // via reduce rather than a reassigned loop variable so this stays a pure
+  // derivation of paymentsChronological.
+  const cumulativePaidAt = paymentsChronological.reduce<number[]>((acc, p) => {
+    const runningTotal = (acc.length > 0 ? acc[acc.length - 1] : 0) + Number(p.amount_jmd);
+    return [...acc, runningTotal];
+  }, []);
+  // Attach each payment's running balance (amount due minus everything paid
+  // up to and including that payment), then reverse to most-recent-first for
+  // display.
+  const paymentsWithRunningBalance = paymentsChronological.map((p, i) => ({
+    payment: p,
+    runningBalance: computeRemainingBalanceJmd(invoice.amount_jmd, cumulativePaidAt[i]),
+  }));
+  const paymentsForDisplay = [...paymentsWithRunningBalance].reverse();
 
   return (
     <div className="max-w-4xl">
@@ -131,7 +159,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
           <dt className="text-veridan-warm-gray">Paid to date</dt>
           <dd className="text-veridan-ink">{formatJmd(totalPaid, 2)}</dd>
           <dt className="text-veridan-warm-gray">Balance remaining</dt>
-          <dd className="text-veridan-ink">{formatJmd(Math.max(balanceRemaining, 0), 2)}</dd>
+          <dd className="text-veridan-ink">{formatJmd(balanceRemaining, 2)}</dd>
         </dl>
         {invoice.fx_note && (
           <p className="mt-4 text-xs text-veridan-warm-gray">
@@ -146,11 +174,11 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">
           Payment history
         </h2>
-        {payments.length === 0 ? (
+        {paymentsForDisplay.length === 0 ? (
           <p className="mb-4 text-sm text-veridan-warm-gray">No payments recorded yet.</p>
         ) : (
           <div className="mb-4 overflow-x-auto rounded-md border border-veridan-warm-gray-light bg-white">
-            <table className="w-full min-w-[560px] table-auto border-collapse text-left text-sm">
+            <table className="w-full min-w-[680px] table-auto border-collapse text-left text-sm">
               <thead>
                 <tr className="border-b border-veridan-warm-gray-light bg-veridan-warm-gray-pale/60 text-[10px] font-semibold uppercase tracking-wide text-veridan-warm-gray">
                   <th className="px-4 py-2">Date</th>
@@ -158,16 +186,18 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
                   <th className="px-4 py-2">Method</th>
                   <th className="px-4 py-2">Reference</th>
                   <th className="px-4 py-2">Notes</th>
+                  <th className="px-4 py-2 text-right">Running balance</th>
                 </tr>
               </thead>
               <tbody>
-                {payments.map((p) => (
+                {paymentsForDisplay.map(({ payment: p, runningBalance }) => (
                   <tr key={p.id} className="border-b border-veridan-warm-gray-light last:border-b-0">
                     <td className="px-4 py-2 text-veridan-ink">{p.paid_at}</td>
                     <td className="px-4 py-2 text-right font-medium text-veridan-ink">{formatJmd(p.amount_jmd, 2)}</td>
                     <td className="px-4 py-2 text-veridan-warm-gray">{p.method ?? "—"}</td>
                     <td className="px-4 py-2 text-veridan-warm-gray">{p.reference ?? "—"}</td>
                     <td className="px-4 py-2 text-veridan-warm-gray">{p.notes ?? "—"}</td>
+                    <td className="px-4 py-2 text-right text-veridan-ink">{formatJmd(runningBalance, 2)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -197,7 +227,12 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
       {/* Workflow actions */}
       <section className="mt-8 rounded-md border border-veridan-warm-gray-light bg-white px-5 py-5">
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">Actions</h2>
-        <InvoiceActionsPanel invoiceId={invoice.id} status={invoice.status} />
+        <InvoiceActionsPanel
+          invoiceId={invoice.id}
+          status={invoice.status}
+          defaultRecipientEmail={defaultRecipientEmail}
+          sentPdfUrl={sentPdfUrl}
+        />
       </section>
     </div>
   );
