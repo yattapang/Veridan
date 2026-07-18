@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDepositContextLine, formatInvoiceJmd, formatInvoiceUsd } from "./format";
+import { buildDepositContextLine, buildItemizationNote, formatInvoiceJmd, formatInvoiceUsd } from "./format";
 
 describe("formatInvoiceJmd", () => {
   it("always shows two decimal places and groups thousands", () => {
@@ -49,5 +49,25 @@ describe("buildDepositContextLine", () => {
 
   it("falls back gracefully when the quote ref is missing", () => {
     expect(buildDepositContextLine("balance", null, null)).toBe("Balance due against quote —.");
+  });
+});
+
+describe("buildItemizationNote", () => {
+  it("explains a deposit invoice's mismatch against the itemized total, with the percentage", () => {
+    expect(buildItemizationNote("deposit", 60)).toBe(
+      "60% deposit against the itemized total below — the amount due above is the deposit share, not the full itemized total.",
+    );
+  });
+
+  it("falls back gracefully when depositPct is missing on a deposit invoice", () => {
+    expect(buildItemizationNote("deposit", null)).toBe(
+      "Deposit against the itemized total below — the amount due above is the deposit share, not the full itemized total.",
+    );
+  });
+
+  it("explains a balance invoice's mismatch without any percentage", () => {
+    expect(buildItemizationNote("balance", 60)).toBe(
+      "Balance due against the itemized total below, after the deposit already invoiced — the amount due above is the remaining share, not the full itemized total.",
+    );
   });
 });

@@ -220,3 +220,22 @@ export const invoicePaymentInstructions = {
   routingOrSwift: "TODO founder: routing / SWIFT code",
   note: "Bank details above are placeholders — founders to confirm real payment instructions before this invoice is sent to a client.",
 } as const;
+
+// MAJOR-3 fix (Phase 2C independent review): placeholder bank details must
+// never reach a real client. The fields above that carry the actual
+// receiving-bank information are prefixed "TODO founder:" while unconfigured
+// (see the header note above) — `accountName` deliberately is NOT checked
+// here since "Veridan Limited" is already the real legal name, not a
+// placeholder. sendInvoice (app/admin/invoices/[id]/actions.ts) calls this
+// before emailing anything; the invoice detail page's InvoiceActionsPanel
+// calls it too, to show the amber warning banner before a founder even
+// reaches for "Send".
+export function paymentInstructionsAreConfigured(): boolean {
+  const fieldsToCheck: string[] = [
+    invoicePaymentInstructions.bankName,
+    invoicePaymentInstructions.accountNumber,
+    invoicePaymentInstructions.branch,
+    invoicePaymentInstructions.routingOrSwift,
+  ];
+  return fieldsToCheck.every((value) => !value.toUpperCase().includes("TODO"));
+}

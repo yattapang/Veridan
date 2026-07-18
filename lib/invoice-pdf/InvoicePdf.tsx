@@ -22,6 +22,8 @@
 import fs from "fs";
 import path from "path";
 import { Document, Image, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
+import { formatCount, formatDoorNumbers, formatJmd2dp, formatJmdWhole, summarizeComposition } from "@/lib/quote-pdf/format";
+import type { QuotePdfDoorGroupRow, QuotePdfFlatLineRow } from "@/lib/quote-pdf/QuotePdf";
 import { formatIsoDate, formatInvoiceJmd, formatInvoiceUsd, INVOICE_PDF_TYPE_LABELS } from "./format";
 import type { InvoiceStatus, InvoiceType } from "@/lib/supabase/types";
 
@@ -54,6 +56,25 @@ export interface InvoicePdfBankDetails {
   note: string;
 }
 
+/**
+ * The invoice's itemized section (MAJOR-2 fix) — the SAME door_register
+ * HW-group rows / line_item flat rows the source quote's own PDF shows
+ * (lib/quote-pdf/itemization.ts), carried over from quote_line_items with no
+ * re-keying. DISPLAY ONLY: `grandTotalJmd` here is the itemized total of the
+ * FULL quote, which is never the invoice's own `amountJmd` (a deposit/balance
+ * invoice's amount is a share of the quote total) — `note` explains that
+ * mismatch so it never reads as a discrepancy. `null` when the source quote's
+ * line items could not be loaded (never blocks rendering the rest of the
+ * invoice — see lib/invoices/pdf.ts).
+ */
+export interface InvoicePdfItemization {
+  mode: "door_register" | "line_item";
+  doorGroups: QuotePdfDoorGroupRow[];
+  flatLines: QuotePdfFlatLineRow[];
+  grandTotalJmd: number;
+  note: string;
+}
+
 export interface InvoicePdfProps {
   wordmark: string;
   invoiceNumber: string;
@@ -75,6 +96,7 @@ export interface InvoicePdfProps {
   dueNote: string | null;
   company: InvoicePdfCompanyDetails;
   bankDetails: InvoicePdfBankDetails;
+  itemization: InvoicePdfItemization | null;
 }
 
 const styles = StyleSheet.create({
@@ -195,6 +217,51 @@ const styles = StyleSheet.create({
     paddingTop: 8,
   },
   footerText: { fontSize: 8, color: WARM_GRAY, textAlign: "center" },
+  // Itemized breakdown (MAJOR-2) — same table shape as lib/quote-pdf/QuotePdf.tsx's
+  // DoorGroupTable/FlatLineTable, at a slightly smaller scale since it sits
+  // below the invoice's own amounts table rather than being the page's focus.
+  itemTable: { marginTop: 4, borderWidth: 1, borderColor: WARM_GRAY_LIGHT, borderStyle: "solid" },
+  itemHeaderRow: {
+    flexDirection: "row",
+    backgroundColor: "#f3f1ec",
+    borderBottomWidth: 1,
+    borderBottomColor: WARM_GRAY_LIGHT,
+    borderBottomStyle: "solid",
+  },
+  itemRow: {
+    flexDirection: "row",
+    borderBottomWidth: 1,
+    borderBottomColor: WARM_GRAY_LIGHT,
+    borderBottomStyle: "solid",
+  },
+  itemRowLast: { flexDirection: "row" },
+  ith: {
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    fontSize: 7.5,
+    fontWeight: 700,
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+    color: WARM_GRAY,
+  },
+  itd: { paddingVertical: 6, paddingHorizontal: 8, fontSize: 9, color: INK },
+  itdSub: { fontSize: 7.5, color: WARM_GRAY, marginTop: 2 },
+  itemColDescription: { flex: 3.2 },
+  itemColDoors: { flex: 2 },
+  itemColCount: { flex: 0.8, textAlign: "right" },
+  itemColPrice: { flex: 1.4, textAlign: "right" },
+  itemColTotal: { flex: 1.4, textAlign: "right" },
+  itemGrandTotalRow: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: WARM_GRAY_LIGHT,
+    borderTopStyle: "solid",
+  },
+  itemGrandTotalLabel: { fontSize: 9, fontWeight: 700, color: INK, marginRight: 12 },
+  itemGrandTotalValue: { fontSize: 10, fontWeight: 700, color: INK },
 });
 
 function Header({ wordmark }: { wordmark: string }) {
@@ -204,6 +271,79 @@ function Header({ wordmark }: { wordmark: string }) {
           is not an HTML <img>; it has no alt prop. */}
       <Image src={LOGO_MARK_SRC} style={styles.logoMark} />
       <Text style={styles.wordmark}>{wordmark}</Text>
+    </View>
+  );
+}
+
+function ItemDoorGroupTable({ rows }: { rows: QuotePdfDoorGroupRow[] }) {
+  return (
+    <View style={styles.itemTable}>
+      <View style={styles.itemHeaderRow}>
+        <Text style={[styles.ith, styles.itemColDescription]}>Hardware set</Text>
+        <Text style={[styles.ith, styles.itemColDoors]}>Doors</Text>
+        <Text style={[styles.ith, styles.itemColCount]}>Qty</Text>
+        <Text style={[styles.ith, styles.itemColPrice]}>Price / door (JMD)</Text>
+        <Text style={[styles.ith, styles.itemColTotal]}>Total (JMD)</Text>
+      </View>
+      {rows.map((row, i) => {
+        const isLast = i === rows.length - 1;
+        const composition = summarizeComposition(row.compositionItems);
+        const setLabel = [row.setCode, row.setName].filter(Boolean).join(" — ");
+        return (
+          <View key={`${row.setCode}-${i}`} style={isLast ? styles.itemRowLast : styles.itemRow}>
+            <View style={[styles.itd, styles.itemColDescription]}>
+              <Text>{setLabel}</Text>
+              {composition ? <Text style={styles.itdSub}>{composition}</Text> : null}
+            </View>
+            <Text style={[styles.itd, styles.itemColDoors]}>{formatDoorNumbers(row.doorNumbers)}</Text>
+            <Text style={[styles.itd, styles.itemColCount]}>{formatCount(row.doorCount)}</Text>
+            <Text style={[styles.itd, styles.itemColPrice]}>{formatJmdWhole(row.pricePerDoorJmd)}</Text>
+            <Text style={[styles.itd, styles.itemColTotal]}>{formatJmdWhole(row.totalJmd)}</Text>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+function ItemFlatLineTable({ rows }: { rows: QuotePdfFlatLineRow[] }) {
+  return (
+    <View style={styles.itemTable}>
+      <View style={styles.itemHeaderRow}>
+        <Text style={[styles.ith, styles.itemColDescription]}>Description</Text>
+        <Text style={[styles.ith, styles.itemColCount]}>Qty</Text>
+        <Text style={[styles.ith, styles.itemColPrice]}>Unit price (JMD)</Text>
+        <Text style={[styles.ith, styles.itemColTotal]}>Line total (JMD)</Text>
+      </View>
+      {rows.map((row, i) => {
+        const isLast = i === rows.length - 1;
+        return (
+          <View key={`${row.description}-${i}`} style={isLast ? styles.itemRowLast : styles.itemRow}>
+            <Text style={[styles.itd, styles.itemColDescription]}>{row.description}</Text>
+            <Text style={[styles.itd, styles.itemColCount]}>{formatCount(row.qty)}</Text>
+            <Text style={[styles.itd, styles.itemColPrice]}>{formatJmd2dp(row.unitPriceJmd)}</Text>
+            <Text style={[styles.itd, styles.itemColTotal]}>{formatJmd2dp(row.lineTotalJmd)}</Text>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+function ItemizedSection({ itemization }: { itemization: InvoicePdfItemization }) {
+  return (
+    <View style={styles.noteSection}>
+      <Text style={styles.sectionTitle}>Itemized breakdown</Text>
+      <Text style={styles.noteLine}>{itemization.note}</Text>
+      {itemization.mode === "door_register" ? (
+        <ItemDoorGroupTable rows={itemization.doorGroups} />
+      ) : (
+        <ItemFlatLineTable rows={itemization.flatLines} />
+      )}
+      <View style={styles.itemGrandTotalRow}>
+        <Text style={styles.itemGrandTotalLabel}>Itemized total (JMD)</Text>
+        <Text style={styles.itemGrandTotalValue}>{formatJmdWhole(itemization.grandTotalJmd)}</Text>
+      </View>
     </View>
   );
 }
@@ -226,6 +366,7 @@ export function InvoicePdf(props: InvoicePdfProps) {
     dueNote,
     company,
     bankDetails,
+    itemization,
   } = props;
 
   const showGctLine = Number.isFinite(gctAmountJmd) && gctAmountJmd !== 0;
@@ -302,6 +443,8 @@ export function InvoicePdf(props: InvoicePdfProps) {
           {dueNote && <Text style={styles.noteLine}>{dueNote}</Text>}
           <Text style={styles.noteLine}>Prices are stated in Jamaican dollars (JMD).</Text>
         </View>
+
+        {itemization && <ItemizedSection itemization={itemization} />}
 
         <View style={styles.noteSection}>
           <Text style={styles.sectionTitle}>Payment instructions</Text>

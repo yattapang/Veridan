@@ -56,3 +56,25 @@ export function buildDepositContextLine(
   }
   return `Balance due against quote ${ref}.`;
 }
+
+/**
+ * Explains why the invoice's itemized breakdown (MAJOR-2 fix — the source
+ * quote's FULL quote_line_items, carried over with no re-keying) totals to
+ * more than this invoice's own `amount_jmd`: a deposit/balance invoice's
+ * amount is only a SHARE of the quote total, never the itemized total
+ * itself. Shown directly under "Itemized breakdown" so the mismatch reads as
+ * expected, not as a discrepancy — see lib/invoice-pdf/InvoicePdf.tsx's
+ * ItemizedSection.
+ */
+export function buildItemizationNote(
+  invoiceType: InvoiceType,
+  depositPct: number | null | undefined,
+): string {
+  if (invoiceType === "deposit") {
+    const pct = depositPct != null && Number.isFinite(Number(depositPct)) ? Number(depositPct) : null;
+    return pct != null
+      ? `${pct}% deposit against the itemized total below — the amount due above is the deposit share, not the full itemized total.`
+      : "Deposit against the itemized total below — the amount due above is the deposit share, not the full itemized total.";
+  }
+  return "Balance due against the itemized total below, after the deposit already invoiced — the amount due above is the remaining share, not the full itemized total.";
+}

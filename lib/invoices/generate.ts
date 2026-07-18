@@ -17,7 +17,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { InvoiceRow, QuoteRow } from "@/lib/supabase/types";
 import { computeBalanceInvoiceAmounts, computeDepositInvoiceAmounts } from "./amounts";
-import { formatInvoiceNumber } from "./numbering";
+import { formatInvoiceNumber, jamaicaYear } from "./numbering";
 
 type Client = SupabaseClient;
 
@@ -27,6 +27,8 @@ export type GenerateInvoiceResult =
   | { ok: false; error: string };
 
 const UNIQUE_CONSTRAINT = "uq_invoices_quote_type_active";
+/** Postgres unique_violation SQLSTATE — see MINOR-6 fix comments below. */
+const POSTGRES_UNIQUE_VIOLATION = "23505";
 
 interface QuoteForInvoice extends QuoteRow {
   projects: { id: string; company_id: string } | null;
@@ -47,7 +49,9 @@ async function loadQuoteForInvoice(
 }
 
 async function nextInvoiceNumber(supabase: Client): Promise<{ number: string } | { error: string }> {
-  const year = new Date().getFullYear();
+  // MINOR-4 fix: Jamaica local time, not the server process's local time —
+  // see lib/invoices/numbering.ts's jamaicaYear header for the full argument.
+  const year = jamaicaYear();
   const { data, error } = await supabase.rpc("next_invoice_number", { p_year: year });
   if (error) return { error: `Could not allocate an invoice number: ${error.message}` };
   const sequence = typeof data === "number" ? data : Number(data);
@@ -112,7 +116,12 @@ export async function generateDepositInvoiceForQuote(
     .single();
 
   if (error) {
-    if (error.message.includes(UNIQUE_CONSTRAINT)) {
+    // MINOR-6 fix: check the PostgREST/Postgres unique-violation error code
+    // ('23505', https://www.postgresql.org/docs/current/errcodes-appendix.html)
+    // first — stable across Postgres versions and never affected by message
+    // wording/locale. The message-substring check is kept ONLY as a fallback
+    // for a client/proxy that (unusually) omits `code`.
+    if (error.code === POSTGRES_UNIQUE_VIOLATION || error.message.includes(UNIQUE_CONSTRAINT)) {
       const existing = await findActiveInvoice(supabase, quoteId, "deposit");
       if (existing) return { ok: true, invoice: existing, alreadyExisted: true };
     }
@@ -170,7 +179,8 @@ export async function generateBalanceInvoiceForQuote(
     .single();
 
   if (error) {
-    if (error.message.includes(UNIQUE_CONSTRAINT)) {
+    // MINOR-6 fix — see the deposit generator's identical comment above.
+    if (error.code === POSTGRES_UNIQUE_VIOLATION || error.message.includes(UNIQUE_CONSTRAINT)) {
       const existing = await findActiveInvoice(supabase, quoteId, "balance");
       if (existing) return { ok: true, invoice: existing, alreadyExisted: true };
     }

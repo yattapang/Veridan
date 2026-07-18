@@ -1,10 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import type { InvoicePaymentRow, InvoiceWithRefs } from "@/lib/supabase/types";
+import type { FxSnapshotStored, InvoicePaymentRow, InvoiceWithRefs, ParametersSnapshotStored } from "@/lib/supabase/types";
 import { InstructiveMessage } from "@/components/admin/InstructiveMessage";
+import { paymentInstructionsAreConfigured } from "@/lib/site-content";
 import { INVOICE_STATUS_BADGE, INVOICE_STATUS_LABELS, INVOICE_TYPE_LABELS } from "@/lib/invoices/format";
+import { loadInvoiceItemization } from "@/lib/invoices/itemization";
 import { computeRemainingBalanceJmd, sumPayments } from "@/lib/invoices/paymentStatus";
+import { formatCount, formatDoorNumbers, formatJmdWhole, summarizeComposition } from "@/lib/quote-pdf/format";
 import { formatJmd, formatUsd } from "@/lib/quotes/format";
 import { loadDefaultRecipientEmail } from "@/lib/quotes/persist";
 import { signInvoicePdfUrl } from "@/lib/storage";
@@ -40,7 +43,9 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
 
   const { data: invoiceData, error: invoiceError } = await supabase
     .from("invoices")
-    .select("*, quotes(id, quote_ref), projects(id, name), companies(id, name)")
+    .select(
+      "*, quotes(id, quote_ref, deposit_pct, quote_mode, margin_pct, parameters_snapshot, fx_snapshot), projects(id, name), companies(id, name)",
+    )
     .eq("id", id)
     .maybeSingle();
 
@@ -56,12 +61,24 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
     );
   }
   if (!invoiceData) notFound();
-  const invoice = invoiceData as unknown as InvoiceWithRefs;
+  const invoice = invoiceData as unknown as InvoiceWithRefs & {
+    quotes:
+      | (InvoiceWithRefs["quotes"] & {
+          deposit_pct: number;
+          quote_mode: "door_register" | "line_item";
+          margin_pct: number;
+          parameters_snapshot: ParametersSnapshotStored;
+          fx_snapshot: FxSnapshotStored;
+        })
+      | null;
+  };
+
+  const paymentInstructionsConfigured = paymentInstructionsAreConfigured();
 
   // Chronological order (oldest first) so a running balance can be computed
   // in payment order, then the display list is reversed (most recent on
   // top) while each row keeps the running-balance value computed here.
-  const [paymentsResult, defaultRecipientEmail, sentPdfUrl] = await Promise.all([
+  const [paymentsResult, defaultRecipientEmail, sentPdfUrl, itemization] = await Promise.all([
     supabase
       .from("invoice_payments")
       .select("*")
@@ -70,6 +87,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
       .order("created_at", { ascending: true }),
     invoice.status === "issued" ? loadDefaultRecipientEmail(supabase, invoice.company_id) : Promise.resolve(null),
     signInvoicePdfUrl(supabase, invoice.pdf_storage_path),
+    invoice.quotes ? loadInvoiceItemization(supabase, invoice.quotes, invoice.invoice_type) : Promise.resolve(null),
   ]);
   const { data: paymentsData, error: paymentsError } = paymentsResult;
   const paymentsChronological = (paymentsData as InvoicePaymentRow[]) ?? [];
@@ -169,6 +187,77 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
         {invoice.due_note && <p className="mt-1 text-xs text-veridan-warm-gray">{invoice.due_note}</p>}
       </section>
 
+      {/* Itemized breakdown (MAJOR-2 fix) — compact, display-only summary of
+          the source quote's own quote_line_items. Never affects the Amounts
+          section above; see lib/invoices/itemization.ts's header. */}
+      {itemization && (
+        <section className="mt-8 rounded-md border border-veridan-warm-gray-light bg-white px-5 py-5">
+          <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">
+            Itemized breakdown
+          </h2>
+          <p className="mb-3 text-xs text-veridan-warm-gray">{itemization.note}</p>
+          <div className="overflow-x-auto rounded-md border border-veridan-warm-gray-light">
+            <table className="w-full min-w-[560px] table-auto border-collapse text-left text-sm">
+              {itemization.mode === "door_register" ? (
+                <>
+                  <thead>
+                    <tr className="border-b border-veridan-warm-gray-light bg-veridan-warm-gray-pale/60 text-[10px] font-semibold uppercase tracking-wide text-veridan-warm-gray">
+                      <th className="px-4 py-2">Hardware set</th>
+                      <th className="px-4 py-2">Doors</th>
+                      <th className="px-4 py-2 text-right">Qty</th>
+                      <th className="px-4 py-2 text-right">Price / door</th>
+                      <th className="px-4 py-2 text-right">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {itemization.doorGroups.map((row, i) => (
+                      <tr key={`${row.setCode}-${i}`} className="border-b border-veridan-warm-gray-light last:border-b-0">
+                        <td className="px-4 py-2 text-veridan-ink">
+                          {[row.setCode, row.setName].filter(Boolean).join(" — ")}
+                          {summarizeComposition(row.compositionItems) && (
+                            <span className="block text-xs text-veridan-warm-gray">
+                              {summarizeComposition(row.compositionItems)}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2 text-veridan-warm-gray">{formatDoorNumbers(row.doorNumbers)}</td>
+                        <td className="px-4 py-2 text-right text-veridan-ink">{formatCount(row.doorCount)}</td>
+                        <td className="px-4 py-2 text-right text-veridan-ink">{formatJmdWhole(row.pricePerDoorJmd)}</td>
+                        <td className="px-4 py-2 text-right text-veridan-ink">{formatJmdWhole(row.totalJmd)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </>
+              ) : (
+                <>
+                  <thead>
+                    <tr className="border-b border-veridan-warm-gray-light bg-veridan-warm-gray-pale/60 text-[10px] font-semibold uppercase tracking-wide text-veridan-warm-gray">
+                      <th className="px-4 py-2">Description</th>
+                      <th className="px-4 py-2 text-right">Qty</th>
+                      <th className="px-4 py-2 text-right">Unit price</th>
+                      <th className="px-4 py-2 text-right">Line total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {itemization.flatLines.map((row, i) => (
+                      <tr key={`${row.description}-${i}`} className="border-b border-veridan-warm-gray-light last:border-b-0">
+                        <td className="px-4 py-2 text-veridan-ink">{row.description}</td>
+                        <td className="px-4 py-2 text-right text-veridan-ink">{formatCount(row.qty)}</td>
+                        <td className="px-4 py-2 text-right text-veridan-ink">{formatJmdWhole(row.unitPriceJmd)}</td>
+                        <td className="px-4 py-2 text-right text-veridan-ink">{formatJmdWhole(row.lineTotalJmd)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </>
+              )}
+            </table>
+          </div>
+          <p className="mt-3 text-right text-sm font-medium text-veridan-ink">
+            Itemized total (JMD): {formatJmdWhole(itemization.grandTotalJmd)}
+          </p>
+        </section>
+      )}
+
       {/* Payment history + record payment */}
       <section className="mt-8">
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">
@@ -232,6 +321,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
           status={invoice.status}
           defaultRecipientEmail={defaultRecipientEmail}
           sentPdfUrl={sentPdfUrl}
+          paymentInstructionsConfigured={paymentInstructionsConfigured}
         />
       </section>
     </div>

@@ -1,8 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState, useState, useTransition } from "react";
 import type { InvoiceStatus } from "@/lib/supabase/types";
-import { issueInvoice, sendInvoice, voidInvoice, type InvoiceActionResult } from "./actions";
+import { issueInvoice, regenerateInvoice, sendInvoice, voidInvoice, type InvoiceActionResult } from "./actions";
 
 const initialResult: InvoiceActionResult = { ok: true };
 
@@ -59,25 +60,92 @@ function ActionButton({
   );
 }
 
+/**
+ * Regenerate button (MINOR-5 fix) — separate from ActionButton because a
+ * successful regenerate has somewhere new to send the founder: the newly
+ * created invoice. Renders a link to it in place of the button rather than
+ * redirecting, so the founder stays on the void invoice's page and can
+ * choose when to follow the link.
+ */
+function RegenerateButton({ invoiceId }: { invoiceId: string }) {
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [newInvoiceId, setNewInvoiceId] = useState<string | null>(null);
+
+  function handleClick() {
+    setError(null);
+    startTransition(async () => {
+      const result = await regenerateInvoice(invoiceId);
+      if (!result.ok) {
+        setError(result.error ?? "Something went wrong.");
+        return;
+      }
+      setNewInvoiceId(result.newInvoiceId);
+    });
+  }
+
+  if (newInvoiceId) {
+    return (
+      <Link href={`/admin/invoices/${newInvoiceId}`} className={primaryButtonClass}>
+        View regenerated invoice →
+      </Link>
+    );
+  }
+
+  return (
+    <div>
+      <button type="button" onClick={handleClick} disabled={pending} className={primaryButtonClass}>
+        {pending ? "Regenerating…" : "Regenerate invoice"}
+      </button>
+      {error && (
+        <p role="alert" className="mt-2 text-xs text-red-600">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function InvoiceActionsPanel({
   invoiceId,
   status,
   defaultRecipientEmail,
   sentPdfUrl,
+  paymentInstructionsConfigured,
 }: {
   invoiceId: string;
   status: InvoiceStatus;
   defaultRecipientEmail: string | null;
   sentPdfUrl: string | null;
+  paymentInstructionsConfigured: boolean;
 }) {
   const canIssue = status === "draft";
   const canVoid = status === "draft" || status === "issued" || status === "sent";
   const canSend = status === "issued";
+  // MINOR-5 fix: a void invoice is otherwise a dead end — offer a way to
+  // create a fresh one for the same quote + type (regenerateInvoice guards
+  // the quote's own state server-side; this button is just visibility).
+  const canRegenerate = status === "void";
 
   const [sendState, sendAction, sendPending] = useActionState(sendInvoice.bind(null, invoiceId), initialResult);
 
   return (
     <div className="space-y-4">
+      {/* MAJOR-3 fix: placeholder bank details gate. Shown for any invoice
+          not yet sent so a founder sees it before reaching for "Send" —
+          sendInvoice (app/admin/invoices/[id]/actions.ts) refuses server-side
+          regardless of whether this banner was seen. */}
+      {!paymentInstructionsConfigured && (status === "draft" || status === "issued") && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-4">
+          <p className="text-xs font-medium text-amber-800">Payment instructions are not configured</p>
+          <p className="mt-1 text-xs text-amber-800">
+            This invoice&rsquo;s PDF still shows placeholder bank details. Add real bank details in{" "}
+            <code>lib/site-content.ts</code> (<code>invoicePaymentInstructions</code>) before sending it to a
+            client — sending is blocked until then.
+          </p>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center gap-3">
         {canIssue && (
           <ActionButton label="Issue" pendingLabel="Issuing…" variant="primary" onRun={() => issueInvoice(invoiceId)} />
@@ -102,6 +170,8 @@ export function InvoiceActionsPanel({
             onRun={() => voidInvoice(invoiceId)}
           />
         )}
+
+        {canRegenerate && <RegenerateButton invoiceId={invoiceId} />}
       </div>
 
       {canSend && (
