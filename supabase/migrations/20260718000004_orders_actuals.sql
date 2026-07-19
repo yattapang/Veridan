@@ -29,6 +29,18 @@
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
+-- Drop the Phase 1 §1.18 placeholder tables first. Same evidence-based
+-- pattern as 20260718000002_invoicing.sql's drop of the placeholder
+-- invoices/payments tables: the base schema (20260713000001) created
+-- `orders` and `actual_costs` as forward-looking placeholders that no code
+-- ever read or wrote before this Phase 2D commit (verified by repo-wide
+-- grep — every reference to either table is introduced in this same
+-- commit), so dropping them cannot lose data or break behavior.
+-- ----------------------------------------------------------------------------
+drop table if exists public.actual_costs;
+drop table if exists public.orders;
+
+-- ----------------------------------------------------------------------------
 -- Orders
 -- ----------------------------------------------------------------------------
 create table public.orders (
