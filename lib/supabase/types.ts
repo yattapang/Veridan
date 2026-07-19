@@ -472,6 +472,81 @@ export interface InvoicePaymentRow {
   created_at: string;
 }
 
+// ---------------------------------------------------------------------------
+// Orders + Actual Costs (Phase 2D, Tasks 52-54) — see
+// 20260718000004_orders_actuals.sql
+// ---------------------------------------------------------------------------
+
+export type OrderStatus = "confirmed" | "in_procurement" | "shipped" | "customs_cleared" | "delivered" | "closed";
+export const ORDER_STATUSES: OrderStatus[] = [
+  "confirmed",
+  "in_procurement",
+  "shipped",
+  "customs_cleared",
+  "delivered",
+  "closed",
+];
+
+export interface OrderRow {
+  id: string;
+  quote_id: string;
+  project_id: string | null;
+  company_id: string | null;
+  status: OrderStatus;
+  customs_cleared_at: string | null;
+  delivered_at: string | null;
+  closed_at: string | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Order joined with quote/project/company, for the list/detail views. */
+export interface OrderWithRefs extends OrderRow {
+  quotes: { id: string; quote_ref: string; total_client_usd: number | null; total_client_jmd: number | null } | null;
+  projects: { id: string; name: string } | null;
+  companies: { id: string; name: string } | null;
+}
+
+export type ActualCostCategory =
+  | "hardware"
+  | "freight"
+  | "insurance"
+  | "brokerage"
+  | "port_handling"
+  | "duty"
+  | "delivery"
+  | "other";
+export const ACTUAL_COST_CATEGORIES: ActualCostCategory[] = [
+  "hardware",
+  "freight",
+  "insurance",
+  "brokerage",
+  "port_handling",
+  "duty",
+  "delivery",
+  "other",
+];
+
+export interface ActualCostRow {
+  id: string;
+  order_id: string;
+  category: ActualCostCategory;
+  description: string | null;
+  amount_usd: number | null;
+  amount_jmd: number | null;
+  incurred_date: string;
+  supplier_id: string | null;
+  notes: string | null;
+  recorded_by: string | null;
+  created_at: string;
+}
+
+export interface ActualCostWithSupplier extends ActualCostRow {
+  suppliers: { id: string; name: string } | null;
+}
+
 /** §1.8 Quote Origins (shipment cost pools per quote) */
 export interface QuoteOriginRow {
   id: string;

@@ -20,7 +20,8 @@ import { buildFxSnapshot, buildParametersSnapshot } from "@/lib/quotes/snapshot"
 import { loadQuoteState, recomputeQuote } from "@/lib/quotes/persist";
 import { canEdit, canTransition, nextRevisionNumber, revisionQuoteRef } from "@/lib/quotes/workflow";
 import { generateBalanceInvoiceForQuote, generateDepositInvoiceForQuote } from "@/lib/invoices/generate";
-import type { BusinessParameterRow, QuoteOriginRow, QuoteRow, QuoteStatus } from "@/lib/supabase/types";
+import { isBeforeCustomsCleared } from "@/lib/orders/workflow";
+import type { BusinessParameterRow, OrderRow, QuoteOriginRow, QuoteRow, QuoteStatus } from "@/lib/supabase/types";
 
 export type WorkflowActionResult = { ok: true; error?: undefined } | { ok: false; error: string };
 
@@ -265,6 +266,16 @@ export async function markQuoteExpired(quoteId: string): Promise<WorkflowActionR
  * Balance invoice generation runs only after the stamp commits and, like
  * acceptQuote, a generation failure is reported as a separate problem on top
  * of an already-committed "customs cleared" fact rather than undone.
+ *
+ * Phase 2D addition (Task 52, non-invasive): if an `orders` row already
+ * exists for this quote (a founder clicked "Create order" from the accepted
+ * quote's page — orders are never auto-created, see
+ * 20260718000004_orders_actuals.sql's header), it is ALSO advanced to
+ * 'customs_cleared'. This is a best-effort, non-fatal side effect: it runs
+ * in its own try/catch, is completely ignored on any error (missing table,
+ * missing order row, RLS issue, whatever), and never affects this
+ * function's return value. Every line of the deposit/balance invoice logic
+ * above and below this block is untouched byte-for-byte from Task 47.
  */
 export async function markCustomsCleared(quoteId: string): Promise<WorkflowActionResult> {
   let supabase;
@@ -306,6 +317,30 @@ export async function markCustomsCleared(quoteId: string): Promise<WorkflowActio
   }
 
   revalidateQuote(quoteId, quote.projects?.id);
+
+  // Non-fatal order-status sync — see this function's header. Never throws
+  // out of this function and never touches the result returned to the
+  // caller; a failure here is silently swallowed, matching the "non-fatal
+  // if absent" requirement.
+  try {
+    const { data: existingOrder } = await supabase
+      .from("orders")
+      .select("id, status")
+      .eq("quote_id", quoteId)
+      .maybeSingle();
+    const order = existingOrder as Pick<OrderRow, "id" | "status"> | null;
+    if (order && isBeforeCustomsCleared(order.status)) {
+      await supabase
+        .from("orders")
+        .update({ status: "customs_cleared", customs_cleared_at: new Date().toISOString() })
+        .eq("id", order.id)
+        .eq("status", order.status);
+      revalidatePath(`/admin/orders/${order.id}`);
+      revalidatePath("/admin/orders");
+    }
+  } catch {
+    // Deliberately swallowed — see header comment.
+  }
 
   const invoiceResult = await generateBalanceInvoiceForQuote(supabase, quoteId, user.id);
   if (!invoiceResult.ok) {

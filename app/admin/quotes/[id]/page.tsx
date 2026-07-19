@@ -29,6 +29,7 @@ import { QuoteLineRow } from "./QuoteLineRow";
 import { StatusTimeline } from "./StatusTimeline";
 import { WorkflowPanel } from "./WorkflowPanel";
 import { CustomsClearedPanel } from "./CustomsClearedPanel";
+import { CreateOrderPanel } from "./CreateOrderPanel";
 import { loadDefaultRecipientEmail } from "@/lib/quotes/persist";
 import { isComputedExpired } from "@/lib/quotes/workflow";
 import { signQuotePdfUrl } from "@/lib/storage";
@@ -209,6 +210,15 @@ export default async function QuoteBuilderPage({
   const nextRevision = nextRevisionResult.data as { id: string; quote_ref: string; revision_number: number } | null;
   const invoices = (invoicesResult.data as InvoiceRow[]) ?? [];
   const hasActiveDepositInvoice = invoices.some((inv) => inv.invoice_type === "deposit" && inv.status !== "void");
+
+  // Task 52: an order is never auto-created — this just checks whether a
+  // founder has already clicked "Create order" for this quote.
+  const { data: existingOrderData } = await supabase
+    .from("orders")
+    .select("id")
+    .eq("quote_id", quote.id)
+    .maybeSingle();
+  const existingOrderId = (existingOrderData as { id: string } | null)?.id ?? null;
 
   // Run the engine over the quote's own frozen snapshots for live display.
   const result = computeQuoteResult({ quote, origins, lines });
@@ -676,6 +686,16 @@ export default async function QuoteBuilderPage({
           </div>
         )}
       </section>
+
+      {/* Order + fulfillment tracking (Task 52/53) */}
+      {quote.status === "accepted" && (
+        <section className="mt-8 rounded-md border border-veridan-warm-gray-light bg-white px-5 py-5">
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">
+            Order &amp; fulfillment
+          </h2>
+          <CreateOrderPanel quoteId={quote.id} existingOrderId={existingOrderId} />
+        </section>
+      )}
 
       {/* Status transitions (Task 19) */}
       <section className="mt-8 rounded-md border border-veridan-warm-gray-light bg-white px-5 py-5">

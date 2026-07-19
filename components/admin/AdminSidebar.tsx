@@ -10,6 +10,8 @@ const NAV_ITEMS: { label: string; href: string }[] = [
   { label: "Projects", href: "/admin/projects" },
   { label: "Quotes", href: "/admin/quotes" },
   { label: "Invoices", href: "/admin/invoices" },
+  { label: "Orders", href: "/admin/orders" },
+  { label: "Reports", href: "/admin/reports" },
   { label: "Companies", href: "/admin/companies" },
   { label: "Suppliers", href: "/admin/suppliers" },
   { label: "Products", href: "/admin/products" },
