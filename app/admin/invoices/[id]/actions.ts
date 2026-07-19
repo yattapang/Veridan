@@ -16,7 +16,7 @@ import { generateBalanceInvoiceForQuote, generateDepositInvoiceForQuote } from "
 import { renderInvoicePdf } from "@/lib/invoices/pdf";
 import { uploadInvoicePdf } from "@/lib/storage";
 import { formatJmd } from "@/lib/quotes/format";
-import { paymentInstructionsAreConfigured } from "@/lib/site-content";
+import { loadConfiguredPaymentInstructions } from "@/lib/invoices/paymentInstructions";
 import {
   computeRemainingBalanceJmd,
   paymentExceedsRemainingBalance,
@@ -282,15 +282,18 @@ export async function sendInvoice(
     return { ok: false, error: "Only an issued invoice can be sent (it may already be sent)." };
   }
 
-  // MAJOR-3 fix: refuse to send while lib/site-content.ts's
-  // invoicePaymentInstructions still carries the honest TODO placeholder
-  // bank details — a real client must never receive a made-up account
-  // number. The invoice detail page shows an amber warning banner for the
-  // same reason before a founder even reaches for this button.
-  if (!paymentInstructionsAreConfigured()) {
+  // MAJOR-3 fix (parameter-backed since 2026-07-19): refuse to send while
+  // the admin-editable "invoice_payment_instructions" parameter still
+  // carries TODO placeholder bank details — a real client must never
+  // receive a made-up account number. The invoice detail page shows an
+  // amber warning banner for the same reason before a founder even reaches
+  // for this button.
+  const { configured } = await loadConfiguredPaymentInstructions(supabase);
+  if (!configured) {
     return {
       ok: false,
-      error: "Add real bank details in lib/site-content.ts invoicePaymentInstructions before sending invoices.",
+      error:
+        "Fill in the real bank details first: Admin → Parameters → \"invoice_payment_instructions\" (replace every TODO field). Sending unlocks automatically once saved.",
     };
   }
 

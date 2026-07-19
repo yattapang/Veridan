@@ -140,7 +140,7 @@ export function InvoiceActionsPanel({
           <p className="text-xs font-medium text-amber-800">Payment instructions are not configured</p>
           <p className="mt-1 text-xs text-amber-800">
             This invoice&rsquo;s PDF still shows placeholder bank details. Add real bank details in{" "}
-            <code>lib/site-content.ts</code> (<code>invoicePaymentInstructions</code>) before sending it to a
+            Admin → Parameters (<code>invoice_payment_instructions</code>) before sending it to a
             client — sending is blocked until then.
           </p>
         </div>

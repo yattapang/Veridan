@@ -19,7 +19,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { buildDepositContextLine } from "@/lib/invoice-pdf/format";
 import { InvoicePdf } from "@/lib/invoice-pdf/InvoicePdf";
 import { loadInvoiceItemization } from "@/lib/invoices/itemization";
-import { invoicePaymentInstructions, siteMeta, contactInfo } from "@/lib/site-content";
+import { loadPaymentInstructions } from "@/lib/invoices/paymentInstructions";
+import { siteMeta, contactInfo } from "@/lib/site-content";
 import type { FxSnapshotStored, InvoiceRow, ParametersSnapshotStored } from "@/lib/supabase/types";
 
 type Client = SupabaseClient;
@@ -76,9 +77,14 @@ export async function renderInvoicePdf(supabase: Client, invoiceId: string): Pro
     invoice.quotes?.deposit_pct ?? null,
   );
 
-  const itemization = invoice.quotes
-    ? await loadInvoiceItemization(supabase, invoice.quotes, invoice.invoice_type)
-    : null;
+  const [itemization, paymentInstructions] = await Promise.all([
+    invoice.quotes
+      ? loadInvoiceItemization(supabase, invoice.quotes, invoice.invoice_type)
+      : Promise.resolve(null),
+    // Admin-editable parameter, read live at render time (never snapshotted —
+    // bank details are banking facts, not priced terms).
+    loadPaymentInstructions(supabase),
+  ]);
 
   const pdfDoc = InvoicePdf({
     wordmark: siteMeta.wordmark,
@@ -100,7 +106,7 @@ export async function renderInvoicePdf(supabase: Client, invoiceId: string): Pro
     depositContextLine,
     dueNote: invoice.due_note,
     company,
-    bankDetails: invoicePaymentInstructions,
+    bankDetails: paymentInstructions,
     itemization,
   });
 

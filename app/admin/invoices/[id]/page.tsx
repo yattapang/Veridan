@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import type { FxSnapshotStored, InvoicePaymentRow, InvoiceWithRefs, ParametersSnapshotStored } from "@/lib/supabase/types";
 import { InstructiveMessage } from "@/components/admin/InstructiveMessage";
-import { paymentInstructionsAreConfigured } from "@/lib/site-content";
+import { loadConfiguredPaymentInstructions } from "@/lib/invoices/paymentInstructions";
 import { INVOICE_STATUS_BADGE, INVOICE_STATUS_LABELS, INVOICE_TYPE_LABELS } from "@/lib/invoices/format";
 import { loadInvoiceItemization } from "@/lib/invoices/itemization";
 import { computeRemainingBalanceJmd, sumPayments } from "@/lib/invoices/paymentStatus";
@@ -73,7 +73,8 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
       | null;
   };
 
-  const paymentInstructionsConfigured = paymentInstructionsAreConfigured();
+  const { configured: paymentInstructionsConfigured } =
+    await loadConfiguredPaymentInstructions(supabase);
 
   // Chronological order (oldest first) so a running balance can be computed
   // in payment order, then the display list is reversed (most recent on

@@ -208,10 +208,13 @@ export const quoteRequestRoutes = {
   retrofit: "/quote-request/retrofit",
 } as const;
 
-// TODO founder: real bank details. Placeholder text only — every field below
-// is honestly labeled as a placeholder on the invoice PDF itself (Task 48a)
-// rather than showing a fabricated account number. Replace with Veridan's
-// actual receiving-bank details before an invoice is sent to a real client.
+// FALLBACK ONLY since 2026-07-19: the live source of truth for bank details
+// is the admin-editable "invoice_payment_instructions" business parameter
+// (Admin → Parameters — founder request: bank details change over time and
+// must be editable without a code change). This constant is used only when
+// that parameter row is missing (e.g. migration unapplied); its TODO markers
+// keep the send gate closed in that state. See
+// lib/invoices/paymentInstructions.ts.
 export const invoicePaymentInstructions = {
   bankName: "TODO founder: bank name",
   accountName: "Veridan Limited",
@@ -221,21 +224,5 @@ export const invoicePaymentInstructions = {
   note: "Bank details above are placeholders — founders to confirm real payment instructions before this invoice is sent to a client.",
 } as const;
 
-// MAJOR-3 fix (Phase 2C independent review): placeholder bank details must
-// never reach a real client. The fields above that carry the actual
-// receiving-bank information are prefixed "TODO founder:" while unconfigured
-// (see the header note above) — `accountName` deliberately is NOT checked
-// here since "Veridan Limited" is already the real legal name, not a
-// placeholder. sendInvoice (app/admin/invoices/[id]/actions.ts) calls this
-// before emailing anything; the invoice detail page's InvoiceActionsPanel
-// calls it too, to show the amber warning banner before a founder even
-// reaches for "Send".
-export function paymentInstructionsAreConfigured(): boolean {
-  const fieldsToCheck: string[] = [
-    invoicePaymentInstructions.bankName,
-    invoicePaymentInstructions.accountNumber,
-    invoicePaymentInstructions.branch,
-    invoicePaymentInstructions.routingOrSwift,
-  ];
-  return fieldsToCheck.every((value) => !value.toUpperCase().includes("TODO"));
-}
+// The configured-check now lives in lib/invoices/paymentInstructionsCore.ts
+// (pure) + lib/invoices/paymentInstructions.ts (parameter-backed loader).
