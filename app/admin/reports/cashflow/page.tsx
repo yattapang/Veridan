@@ -3,9 +3,10 @@ import { createClient } from "@/lib/supabase/server";
 import { InstructiveMessage } from "@/components/admin/InstructiveMessage";
 import { formatJmd } from "@/lib/quotes/format";
 import { yearToDateRange, type ReportDateRange } from "@/lib/reports/period";
-import { computeCashFlowByMonth, totalCashInJmd, type CashInEntry } from "@/lib/reports/cashflow";
-import type { InvoiceType } from "@/lib/supabase/types";
+import { computeCashFlowByMonth, totalCashInJmd } from "@/lib/reports/cashflow";
+import { loadCashFlowData } from "@/lib/reports/load";
 import { DateRangeFilter } from "../DateRangeFilter";
+import { ExportLinks } from "../ExportLinks";
 
 export const metadata = {
   title: "Cash Flow Report",
@@ -14,18 +15,6 @@ export const metadata = {
 function firstParam(value: string | string[] | undefined): string {
   if (Array.isArray(value)) return value[0] ?? "";
   return value ?? "";
-}
-
-interface PaymentJoinRow {
-  amount_jmd: number;
-  paid_at: string;
-  method: string | null;
-  reference: string | null;
-  invoices: {
-    invoice_number: string;
-    invoice_type: InvoiceType;
-    quotes: { quote_ref: string } | null;
-  } | null;
 }
 
 export default async function CashFlowReportPage({
@@ -57,33 +46,18 @@ export default async function CashFlowReportPage({
     );
   }
 
-  const { data, error } = await supabase
-    .from("invoice_payments")
-    .select("amount_jmd, paid_at, method, reference, invoices(invoice_number, invoice_type, quotes(quote_ref))")
-    .gte("paid_at", range.startIso)
-    .lte("paid_at", range.endIso);
-
-  if (error) {
+  const { data: entries, error } = await loadCashFlowData(supabase, range);
+  if (error || !entries) {
     return (
       <div>
         <h1 className="mb-6 text-2xl font-semibold text-veridan-ink">Cash flow</h1>
         <InstructiveMessage
           title="Could not reach the database"
-          body={`The report data couldn't be loaded (${error.message}). Check that migrations are applied and reload.`}
+          body={`The report data couldn't be loaded (${error ?? "unknown error"}). Check that migrations are applied and reload.`}
         />
       </div>
     );
   }
-
-  const entries: CashInEntry[] = ((data as unknown as PaymentJoinRow[]) ?? []).map((p) => ({
-    amountJmd: p.amount_jmd,
-    paidAtIso: p.paid_at,
-    invoiceNumber: p.invoices?.invoice_number ?? "—",
-    invoiceType: p.invoices?.invoice_type ?? "deposit",
-    quoteRef: p.invoices?.quotes?.quote_ref ?? "—",
-    method: p.method,
-    reference: p.reference,
-  }));
 
   const monthly = computeCashFlowByMonth(entries, range);
   const total = totalCashInJmd(monthly);
@@ -96,11 +70,20 @@ export default async function CashFlowReportPage({
       >
         ← Reports
       </Link>
-      <h1 className="mt-3 text-2xl font-semibold text-veridan-ink">Cash flow</h1>
-      <p className="mt-2 text-sm text-veridan-warm-gray">
-        Cash in — every recorded invoice payment, never a quote&apos;s projected total. Invoice/quote references are
-        shown as labels only.
-      </p>
+      <div className="mt-3 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold text-veridan-ink">Cash flow</h1>
+          <p className="mt-2 max-w-3xl text-sm text-veridan-warm-gray">
+            Cash in — every recorded invoice payment, never a quote&apos;s projected total. Invoice/quote references are
+            shown as labels only.
+          </p>
+        </div>
+        <ExportLinks
+          links={[{ label: "Export CSV", href: "/api/reports/cashflow/export" }]}
+          startIso={range.startIso}
+          endIso={range.endIso}
+        />
+      </div>
 
       <div className="mt-6">
         <DateRangeFilter startIso={range.startIso} endIso={range.endIso} />

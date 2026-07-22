@@ -3,9 +3,10 @@ import { createClient } from "@/lib/supabase/server";
 import { InstructiveMessage } from "@/components/admin/InstructiveMessage";
 import { formatJmd, formatPct, formatUsd } from "@/lib/quotes/format";
 import { yearToDateRange, type ReportDateRange } from "@/lib/reports/period";
-import { computePnlByMonth, computePnlByOrder, type OrderRateLookup, type PnlCostInput, type PnlPaymentInput } from "@/lib/reports/pnl";
-import type { ActualCostCategory } from "@/lib/supabase/types";
+import { computePnlByMonth, computePnlByOrder } from "@/lib/reports/pnl";
+import { loadPnlData } from "@/lib/reports/load";
 import { DateRangeFilter } from "../DateRangeFilter";
+import { ExportLinks } from "../ExportLinks";
 
 export const metadata = {
   title: "P&L Report",
@@ -14,30 +15,6 @@ export const metadata = {
 function firstParam(value: string | string[] | undefined): string {
   if (Array.isArray(value)) return value[0] ?? "";
   return value ?? "";
-}
-
-interface PaymentJoinRow {
-  amount_jmd: number;
-  paid_at: string;
-  invoices: {
-    invoice_number: string;
-    quote_id: string;
-    quotes: { quote_ref: string } | null;
-  } | null;
-}
-
-interface CostJoinRow {
-  order_id: string;
-  category: ActualCostCategory;
-  amount_usd: number | null;
-  amount_jmd: number | null;
-  incurred_date: string;
-}
-
-interface OrderJoinRow {
-  id: string;
-  quote_id: string;
-  quotes: { fx_snapshot: { effective_rate: number } } | null;
 }
 
 export default async function PnlReportPage({
@@ -69,57 +46,20 @@ export default async function PnlReportPage({
     );
   }
 
-  const [paymentsResult, costsResult, ordersResult] = await Promise.all([
-    supabase
-      .from("invoice_payments")
-      .select("amount_jmd, paid_at, invoices(invoice_number, quote_id, quotes(quote_ref))")
-      .gte("paid_at", range.startIso)
-      .lte("paid_at", range.endIso),
-    supabase
-      .from("actual_costs")
-      .select("order_id, category, amount_usd, amount_jmd, incurred_date")
-      .gte("incurred_date", range.startIso)
-      .lte("incurred_date", range.endIso),
-    supabase.from("orders").select("id, quote_id, quotes(fx_snapshot)"),
-  ]);
-
-  const loadError = paymentsResult.error ?? costsResult.error ?? ordersResult.error;
-  if (loadError) {
+  const { data, error: loadError } = await loadPnlData(supabase, range);
+  if (loadError || !data) {
     return (
       <div>
         <h1 className="mb-6 text-2xl font-semibold text-veridan-ink">P&amp;L</h1>
         <InstructiveMessage
           title="Could not reach the database"
-          body={`The report data couldn't be loaded (${loadError.message}). Check that migrations are applied and reload.`}
+          body={`The report data couldn't be loaded (${loadError ?? "unknown error"}). Check that migrations are applied and reload.`}
         />
       </div>
     );
   }
 
-  const orders = (ordersResult.data as unknown as OrderJoinRow[]) ?? [];
-  const quoteIdToOrderId = new Map(orders.map((o) => [o.quote_id, o.id]));
-  const rateByOrderId: OrderRateLookup = {};
-  for (const o of orders) {
-    const rate = o.quotes?.fx_snapshot?.effective_rate;
-    if (rate != null) rateByOrderId[o.id] = rate;
-  }
-
-  const payments: PnlPaymentInput[] = ((paymentsResult.data as unknown as PaymentJoinRow[]) ?? []).map((p) => ({
-    amountJmd: p.amount_jmd,
-    paidAtIso: p.paid_at,
-    orderId: p.invoices?.quote_id ? (quoteIdToOrderId.get(p.invoices.quote_id) ?? null) : null,
-    quoteRef: p.invoices?.quotes?.quote_ref ?? "—",
-    invoiceNumber: p.invoices?.invoice_number ?? "—",
-  }));
-
-  const costs: PnlCostInput[] = ((costsResult.data as unknown as CostJoinRow[]) ?? []).map((c) => ({
-    orderId: c.order_id,
-    amountUsd: c.amount_usd,
-    amountJmd: c.amount_jmd,
-    incurredDateIso: c.incurred_date,
-    category: c.category,
-  }));
-
+  const { payments, costs, rateByOrderId } = data;
   const monthly = computePnlByMonth(payments, costs, rateByOrderId, range);
   const byOrder = computePnlByOrder(payments, costs, rateByOrderId, range);
   const totalRevenue = monthly.reduce((s, r) => s + r.revenueJmd, 0);
@@ -135,12 +75,21 @@ export default async function PnlReportPage({
       >
         ← Reports
       </Link>
-      <h1 className="mt-3 text-2xl font-semibold text-veridan-ink">Profit &amp; loss</h1>
-      <p className="mt-2 text-sm text-veridan-warm-gray">
-        Cash basis — revenue is invoice payments actually received, never a quote&apos;s projected total. Costs are
-        actual costs recorded against each order, converted to JMD for display at each order&apos;s own quote-locked
-        FX rate where a cost was entered in USD only.
-      </p>
+      <div className="mt-3 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold text-veridan-ink">Profit &amp; loss</h1>
+          <p className="mt-2 max-w-3xl text-sm text-veridan-warm-gray">
+            Cash basis — revenue is invoice payments actually received, never a quote&apos;s projected total. Costs are
+            actual costs recorded against each order, converted to JMD for display at each order&apos;s own quote-locked
+            FX rate where a cost was entered in USD only.
+          </p>
+        </div>
+        <ExportLinks
+          links={[{ label: "Export CSV", href: "/api/reports/pnl/export" }]}
+          startIso={range.startIso}
+          endIso={range.endIso}
+        />
+      </div>
 
       <div className="mt-6">
         <DateRangeFilter startIso={range.startIso} endIso={range.endIso} />
