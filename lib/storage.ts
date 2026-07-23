@@ -248,3 +248,83 @@ export function articleHeroImagePublicUrl(
   const { data } = supabase.storage.from("article-hero-images").getPublicUrl(path);
   return data.publicUrl ?? null;
 }
+
+/**
+ * Uploads a supplier catalogue/spec-sheet PDF to the PRIVATE `catalogue-
+ * files` bucket (Phase 3C, Plan §3.2 — every document, public or internal,
+ * lands in this one private bucket; there is deliberately no separate
+ * public bucket, see the migration's guardrail note). Founders are
+ * `authenticated`, which has full CRUD on this bucket per
+ * supabase/migrations/20260723000002_catalogue_library.sql.
+ */
+export async function uploadCatalogueFile(
+  supabase: SupabaseClient,
+  path: string,
+  file: File
+): Promise<{ error: string | null }> {
+  const { error } = await supabase.storage.from("catalogue-files").upload(path, file, {
+    contentType: file.type || undefined,
+    upsert: false,
+  });
+  if (error) return { error: error.message };
+  return { error: null };
+}
+
+/**
+ * Uploads an optional cover-image thumbnail for a catalogue document, into
+ * the SAME private `catalogue-files` bucket as the document itself (not a
+ * separate public bucket — a thumbnail is served through the same §3.3
+ * gated route as the document, see app/api/catalogue/[id]/thumbnail).
+ * `upsert: true` so replacing a thumbnail is a plain re-upload.
+ */
+export async function uploadCatalogueThumbnail(
+  supabase: SupabaseClient,
+  path: string,
+  file: File
+): Promise<{ error: string | null }> {
+  const { error } = await supabase.storage.from("catalogue-files").upload(path, file, {
+    contentType: file.type || undefined,
+    upsert: true,
+  });
+  if (error) return { error: error.message };
+  return { error: null };
+}
+
+/**
+ * Signs a URL for a catalogue document's file, for the ADMIN list's
+ * preview/download link (a founder-authenticated session, works for
+ * Internal or Public documents alike since `authenticated` has full bucket
+ * access). This is NOT the public-facing gated route — that's
+ * lib/catalogue/gatedDownload.ts, used by app/api/catalogue/[id]/download
+ * for anonymous/public visitors and re-checks visibility live on every call.
+ * Best-effort, same pattern as signPriceFileUrl.
+ */
+export async function signCatalogueFileUrl(
+  supabase: SupabaseClient,
+  path: string | null | undefined,
+  expiresInSeconds = 60 * 5
+): Promise<string | null> {
+  if (!path) return null;
+  try {
+    const { data, error } = await supabase.storage.from("catalogue-files").createSignedUrl(path, expiresInSeconds);
+    if (error || !data) return null;
+    return data.signedUrl;
+  } catch {
+    return null;
+  }
+}
+
+/** Removes a catalogue document's file and (if present) thumbnail from Storage. Best-effort — failures are swallowed, mirroring the cleanup-on-delete discipline elsewhere in this file. */
+export async function removeCatalogueFiles(
+  supabase: SupabaseClient,
+  paths: (string | null | undefined)[]
+): Promise<void> {
+  const toRemove = paths.filter((p): p is string => Boolean(p));
+  if (toRemove.length === 0) return;
+  try {
+    await supabase.storage.from("catalogue-files").remove(toRemove);
+  } catch {
+    // best-effort cleanup only — an orphaned Storage object is a lesser
+    // problem than failing the delete the founder actually asked for.
+  }
+}

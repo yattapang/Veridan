@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { PageHero } from "@/components/PageHero";
 import { Container } from "@/components/Container";
 import { ButtonLink } from "@/components/Button";
@@ -52,6 +53,16 @@ export default async function ProductsPage() {
           <p className="mt-12 text-sm text-veridan-warm-gray">
             Prices are project-specific and never published — every quote is
             an itemised, landed-cost figure prepared for your project.
+          </p>
+
+          <p className="mt-4 text-sm text-veridan-warm-gray">
+            Looking for manufacturer specification data?{" "}
+            <Link
+              href="/catalogue"
+              className="font-semibold text-veridan-accent-text underline underline-offset-2 hover:text-veridan-ink"
+            >
+              Browse downloadable catalogues &amp; spec sheets →
+            </Link>
           </p>
 
           <div className="mt-8">

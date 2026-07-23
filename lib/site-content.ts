@@ -58,11 +58,16 @@ export const enquiryNotificationRecipients = [
 // content (Plan §2.5: "Add 'Articles' to the marketing nav ... this IS a
 // structural nav change, acceptable here"). navLinks itself stays hardcoded
 // per the Phase 3A exclusion above; only its entries changed.
+// Phase 3C (2026-07-23): "Catalogue" added — same structural-nav-change
+// exception, per the build brief's placement decision (a dedicated
+// /catalogue route + nav link, rather than Plan §3.5's fallback
+// recommendation of a panel on /products; /products also links out to it).
 export const navLinks = [
   { href: "/", label: "Home" },
   { href: "/new-construction", label: "New Construction" },
   { href: "/retrofit", label: "Retrofit & Replacement" },
   { href: "/products", label: "Products" },
+  { href: "/catalogue", label: "Catalogue" },
   { href: "/articles", label: "Articles" },
   { href: "/about", label: "About" },
   { href: "/contact", label: "Contact" },

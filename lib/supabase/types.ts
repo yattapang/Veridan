@@ -825,3 +825,42 @@ export interface ArticleAiDraftLogRow {
   created_by: string | null;
   created_at: string;
 }
+
+// ---------------------------------------------------------------------------
+// Phase 3C — Catalogue/spec library (Plan §3.2). See
+// supabase/migrations/20260723000002_catalogue_library.sql and lib/catalogue/.
+// ---------------------------------------------------------------------------
+
+export type CatalogueVisibility = "internal" | "public";
+export const CATALOGUE_VISIBILITIES: CatalogueVisibility[] = ["internal", "public"];
+
+/**
+ * §3.2 catalogue_documents. `visibility` defaults to 'internal' at the
+ * SCHEMA level (the §3.3 guardrail) — this type doesn't and can't enforce
+ * that, but every write path in app/admin/catalogue/actions.ts relies on the
+ * column default rather than re-deriving it client-side.
+ */
+export interface CatalogueDocumentRow {
+  id: string;
+  brand: string;
+  category: string | null;
+  title: string;
+  description: string | null;
+  file_storage_path: string;
+  original_filename: string | null;
+  file_size_bytes: number | null;
+  thumbnail_storage_path: string | null;
+  supplier_id: string | null;
+  visibility: CatalogueVisibility;
+  published_at: string | null;
+  uploaded_by: string | null;
+  uploaded_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Catalogue document row joined with supplier + uploader, for the admin list. */
+export interface CatalogueDocumentWithDetails extends CatalogueDocumentRow {
+  suppliers: { id: string; name: string } | null;
+  users: { id: string; email: string; display_name: string | null } | null;
+}
