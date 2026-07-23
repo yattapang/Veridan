@@ -333,7 +333,15 @@ function computeOrderRow(
   // Expected full revenue: the largest defensible target — whatever has been
   // billed, or the quoted client total, or (as a floor) what's already been
   // received — so a deposit-only order isn't judged as if the deposit were its
-  // whole revenue.
+  // whole revenue. Deliberately keeps the quoted total in the max(): under the
+  // deposit/balance model only the 60% deposit is invoiced until customs
+  // clearance, so `totalInvoicedJmd` understates true expected revenue for
+  // most of an order's life — using it as the base would false-flag every
+  // normal in-flight order. Phase 2D review MINOR-2 (the reverse case, a
+  // renegotiated-DOWN order whose quote overstates) is handled by labeling
+  // this figure "optimistic" in the completeness note below rather than by
+  // changing the base, since data integrity is not affected either way and
+  // the realized cash figure takes over once the order is closed + fully paid.
   const projectedRevenueJmd = Math.max(
     totalInvoicedJmd,
     order.quotedClientJmd ?? 0,
@@ -357,7 +365,17 @@ function computeOrderRow(
     if (!fullyPaid) {
       reasons.push(totalInvoicedJmd === 0 ? "no invoices issued yet" : "invoices not fully paid");
     }
-    completenessNote = `Provisional — ${reasons.join(", ")}; figure shown is projected-realized (expected full revenue vs. costs recorded so far).`;
+    // The projected figure pairs *expected-full* revenue against
+    // costs-recorded-*so-far*, so it reads optimistically while costs are
+    // still landing — state that plainly (Phase 2D review MINOR-2) so a
+    // founder doesn't over-trust an unflagged in-flight order.
+    const revenueBasis =
+      projectedRevenueJmd > totalInvoicedJmd && totalInvoicedJmd > 0
+        ? "quoted total (exceeds what's been invoiced so far)"
+        : totalInvoicedJmd > 0
+          ? "invoiced total"
+          : "quoted total";
+    completenessNote = `Provisional — ${reasons.join(", ")}; figure is projected-realized: expected full revenue (${revenueBasis}) vs. costs recorded so far, so it reads optimistically until all costs are in.`;
   }
 
   return {

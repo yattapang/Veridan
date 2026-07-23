@@ -24,6 +24,21 @@ describe("csvField", () => {
   it("does not emit thousands separators for numbers (stays re-parseable)", () => {
     expect(csvField(1234567.89)).toBe("1234567.89");
   });
+
+  it("neutralizes formula-injection triggers on string cells (MINOR-1 fix)", () => {
+    // A scanned supplier name / description could start with one of these.
+    expect(csvField("=HYPERLINK(\"http://evil\")")).toBe(
+      "\"'=HYPERLINK(\"\"http://evil\"\")\""
+    );
+    expect(csvField("+1-800-CALL")).toBe("'+1-800-CALL");
+    expect(csvField("-500 credit")).toBe("'-500 credit");
+    expect(csvField("@handle")).toBe("'@handle");
+  });
+
+  it("does NOT prefix legitimate negative numbers (they must stay parseable)", () => {
+    expect(csvField(-500)).toBe("-500");
+    expect(csvField(-3.14)).toBe("-3.14");
+  });
 });
 
 describe("buildCsv", () => {
