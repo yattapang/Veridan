@@ -1,4 +1,5 @@
 import { getSiteMeta, getContactInfo } from "@/lib/site-content-db/loader";
+import { serializeJsonLd } from "@/lib/json-ld";
 
 /**
  * LocalBusiness structured data (PRD §5.2). Rendered on the home page only.
@@ -31,7 +32,7 @@ export async function LocalBusinessJsonLd() {
   return (
     <script
       type="application/ld+json"
-      dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      dangerouslySetInnerHTML={{ __html: serializeJsonLd(jsonLd) }}
     />
   );
 }

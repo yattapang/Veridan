@@ -1,4 +1,5 @@
 import { siteMeta } from "@/lib/site-content";
+import { serializeJsonLd } from "@/lib/json-ld";
 import type { PublicArticle } from "@/lib/articles/publicLoader";
 
 /**
@@ -39,7 +40,7 @@ export function ArticleJsonLd({
   return (
     <script
       type="application/ld+json"
-      dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      dangerouslySetInnerHTML={{ __html: serializeJsonLd(jsonLd) }}
     />
   );
 }
