@@ -1,6 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { computePnlByMonth, computePnlByOrder, costAmountJmd, type PnlCostInput, type PnlPaymentInput } from "./pnl";
+import {
+  computePnlByMonth,
+  computePnlByOrder,
+  costAmountJmd,
+  mergeCategoryTotals,
+  type PnlCostInput,
+  type PnlMonthRow,
+  type PnlOrderRow,
+  type PnlPaymentInput,
+} from "./pnl";
 import type { ReportDateRange } from "./period";
+
+/** Sums a row's `byCategory` map — used to assert it always reconciles to `costJmd`. */
+function sumByCategory(row: { byCategory: Partial<Record<string, number>> }): number {
+  return Object.values(row.byCategory).reduce((s: number, v) => s + (v ?? 0), 0);
+}
 
 const RANGE: ReportDateRange = { startIso: "2026-01-01", endIso: "2026-12-31" };
 const RATE = 166.86; // JMD per 1 USD
@@ -107,6 +121,73 @@ describe("computePnlByMonth", () => {
     const rows = computePnlByMonth(payments, [], {}, RANGE);
     expect(rows.reduce((s, r) => s + r.revenueJmd, 0)).toBe(0);
   });
+
+  it("breaks JMD cost down by category within a month, and across different months", () => {
+    const costs: PnlCostInput[] = [
+      { orderId: "o1", amountUsd: null, amountJmd: 10000, incurredDateIso: "2026-03-01", category: "hardware" },
+      { orderId: "o1", amountUsd: null, amountJmd: 4000, incurredDateIso: "2026-03-15", category: "freight" },
+      { orderId: "o1", amountUsd: null, amountJmd: 2500, incurredDateIso: "2026-03-20", category: "hardware" },
+      { orderId: "o1", amountUsd: null, amountJmd: 7000, incurredDateIso: "2026-04-01", category: "duty" },
+    ];
+    const rows = computePnlByMonth([], costs, {}, RANGE);
+    const march = rows.find((r) => r.monthKey === "2026-03")!;
+    const april = rows.find((r) => r.monthKey === "2026-04")!;
+
+    expect(march.byCategory).toEqual({ hardware: 12500, freight: 4000 });
+    expect(april.byCategory).toEqual({ duty: 7000 });
+  });
+
+  it("combines a USD-only row with a JMD row in the same category, converting the USD side", () => {
+    const costs: PnlCostInput[] = [
+      { orderId: "o1", amountUsd: null, amountJmd: 10000, incurredDateIso: "2026-05-01", category: "insurance" },
+      { orderId: "o1", amountUsd: 100, amountJmd: null, incurredDateIso: "2026-05-15", category: "insurance" },
+    ];
+    const rows = computePnlByMonth([], costs, { o1: RATE }, RANGE);
+    const may = rows.find((r) => r.monthKey === "2026-05")!;
+    expect(may.byCategory).toEqual({ insurance: 10000 + 16686 });
+    expect(may.byCategory.insurance).toBeCloseTo(26686, 2);
+  });
+
+  it("surfaces an unconvertible USD-only category cost separately rather than dropping it", () => {
+    const costs: PnlCostInput[] = [
+      { orderId: "o1", amountUsd: null, amountJmd: 5000, incurredDateIso: "2026-06-01", category: "brokerage" },
+      { orderId: "unknown-order", amountUsd: 300, amountJmd: null, incurredDateIso: "2026-06-10", category: "brokerage" },
+      { orderId: "unknown-order", amountUsd: 50, amountJmd: null, incurredDateIso: "2026-06-12", category: "duty" },
+    ];
+    const rows = computePnlByMonth([], costs, {}, RANGE);
+    const june = rows.find((r) => r.monthKey === "2026-06")!;
+
+    // Only the converted brokerage row counts toward byCategory/costJmd.
+    expect(june.byCategory).toEqual({ brokerage: 5000 });
+    expect(june.costJmd).toBe(5000);
+    // The unconvertible rows are tracked per category instead of silently dropped.
+    expect(june.unconvertedUsdByCategory).toEqual({ brokerage: 300, duty: 50 });
+    expect(june.unconvertedCostUsd).toBe(350);
+  });
+
+  it("leaves byCategory absent (empty object) for a month with no cost data — not zero-filled per category", () => {
+    const rows = computePnlByMonth([], [], {}, { startIso: "2026-01-01", endIso: "2026-02-28" });
+    for (const row of rows) {
+      expect(row.byCategory).toEqual({});
+      expect(Object.keys(row.byCategory)).toHaveLength(0);
+    }
+  });
+
+  it("guarantees the sum of category subtotals equals costJmd for every month (grand-total consistency)", () => {
+    const costs: PnlCostInput[] = [
+      { orderId: "o1", amountUsd: null, amountJmd: 10000, incurredDateIso: "2026-07-01", category: "hardware" },
+      { orderId: "o1", amountUsd: 100, amountJmd: null, incurredDateIso: "2026-07-05", category: "freight" },
+      { orderId: "o1", amountUsd: null, amountJmd: 3000, incurredDateIso: "2026-07-10", category: "other" },
+      // unconvertible — must NOT be counted in costJmd or byCategory.
+      { orderId: "unknown", amountUsd: 999, amountJmd: null, incurredDateIso: "2026-07-15", category: "delivery" },
+    ];
+    const rows = computePnlByMonth([], costs, { o1: RATE }, RANGE);
+    for (const row of rows) {
+      expect(sumByCategory(row)).toBeCloseTo(row.costJmd, 6);
+    }
+    const july = rows.find((r) => r.monthKey === "2026-07")!;
+    expect(july.costJmd).toBeCloseTo(10000 + 16686 + 3000, 2);
+  });
 });
 
 describe("computePnlByOrder", () => {
@@ -145,5 +226,69 @@ describe("computePnlByOrder", () => {
     expect(rows[0].quoteRef).toBe("VQ-A");
     // quoteRef is a string, never summed — this test documents (not just asserts) that intent.
     expect(typeof rows[0].quoteRef).toBe("string");
+  });
+
+  it("breaks cost down by category per order, mixing USD and JMD rows within a category", () => {
+    const payments: PnlPaymentInput[] = [
+      { amountJmd: 200000, paidAtIso: "2026-02-01", orderId: "o1", quoteRef: "VQ-A", invoiceNumber: "VI-1" },
+    ];
+    const costs: PnlCostInput[] = [
+      { orderId: "o1", amountUsd: null, amountJmd: 10000, incurredDateIso: "2026-02-05", category: "hardware" },
+      { orderId: "o1", amountUsd: 100, amountJmd: null, incurredDateIso: "2026-02-06", category: "hardware" },
+      { orderId: "o1", amountUsd: null, amountJmd: 2000, incurredDateIso: "2026-02-07", category: "port_handling" },
+    ];
+    const rows = computePnlByOrder(payments, costs, { o1: RATE }, RANGE);
+    const order = rows[0];
+    expect(order.byCategory.hardware).toBeCloseTo(10000 + 16686, 2);
+    expect(order.byCategory.port_handling).toBe(2000);
+    expect(Object.keys(order.byCategory).sort()).toEqual(["hardware", "port_handling"]);
+  });
+
+  it("tracks an unconvertible USD-only category cost per order without dropping it, and keeps grand-total consistency", () => {
+    const payments: PnlPaymentInput[] = [
+      { amountJmd: 50000, paidAtIso: "2026-02-01", orderId: "o1", quoteRef: "VQ-A", invoiceNumber: "VI-1" },
+    ];
+    const costs: PnlCostInput[] = [
+      { orderId: "o1", amountUsd: null, amountJmd: 5000, incurredDateIso: "2026-02-05", category: "duty" },
+      // o1 has no rate registered below, so this USD-only row is unconvertible.
+      { orderId: "o1", amountUsd: 40, amountJmd: null, incurredDateIso: "2026-02-06", category: "duty" },
+      { orderId: "o1", amountUsd: 15, amountJmd: null, incurredDateIso: "2026-02-07", category: "other" },
+    ];
+    const rows = computePnlByOrder(payments, costs, {}, RANGE);
+    const order = rows[0];
+
+    expect(order.byCategory).toEqual({ duty: 5000 });
+    expect(order.unconvertedUsdByCategory).toEqual({ duty: 40, other: 15 });
+    expect(order.unconvertedCostUsd).toBe(55);
+    expect(sumByCategory(order)).toBeCloseTo(order.costJmd, 6);
+  });
+});
+
+describe("mergeCategoryTotals", () => {
+  it("merges category subtotals across many rows into one portfolio-level total per category", () => {
+    const rows: Pick<PnlMonthRow, "byCategory">[] = [
+      { byCategory: { hardware: 1000, freight: 200 } },
+      { byCategory: { hardware: 500, duty: 75 } },
+      { byCategory: {} },
+    ];
+    expect(mergeCategoryTotals(rows)).toEqual({ hardware: 1500, freight: 200, duty: 75 });
+  });
+
+  it("returns an empty object when every row has an empty byCategory", () => {
+    const rows: Pick<PnlOrderRow, "byCategory">[] = [{ byCategory: {} }, { byCategory: {} }];
+    expect(mergeCategoryTotals(rows)).toEqual({});
+  });
+
+  it("reconciles with the grand total: merging every month's byCategory sums to the portfolio costJmd", () => {
+    const costs: PnlCostInput[] = [
+      { orderId: "o1", amountUsd: null, amountJmd: 10000, incurredDateIso: "2026-01-10", category: "hardware" },
+      { orderId: "o1", amountUsd: null, amountJmd: 4000, incurredDateIso: "2026-02-10", category: "freight" },
+      { orderId: "o1", amountUsd: 100, amountJmd: null, incurredDateIso: "2026-03-10", category: "hardware" },
+    ];
+    const monthly = computePnlByMonth([], costs, { o1: RATE }, RANGE);
+    const portfolioByCategory = mergeCategoryTotals(monthly);
+    const totalFromCategories = Object.values(portfolioByCategory).reduce((s, v) => s + (v ?? 0), 0);
+    const totalCostJmd = monthly.reduce((s, r) => s + r.costJmd, 0);
+    expect(totalFromCategories).toBeCloseTo(totalCostJmd, 6);
   });
 });

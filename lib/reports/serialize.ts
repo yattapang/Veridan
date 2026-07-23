@@ -14,6 +14,8 @@ import type { ReportDateRange } from "./period";
 import type { PnlMonthRow, PnlOrderRow } from "./pnl";
 import type { OrdersRawRow } from "./load";
 import type { CsvCell } from "./csv";
+import { ACTUAL_COST_CATEGORY_LABELS } from "../orders/format";
+import { ACTUAL_COST_CATEGORIES, type ActualCostCategory } from "../supabase/types";
 
 function round2(n: number | null | undefined): number | null {
   if (n == null || !Number.isFinite(n)) return null;
@@ -37,16 +39,37 @@ function titleBlock(title: string, range: ReportDateRange): CsvCell[][] {
 // P&L
 // ---------------------------------------------------------------------------
 
+/** Fixed column order for the per-category cost breakdown — stable across exports so an accountant's saved pivot/formula references don't shift when a category happens to have no data in a given period. */
+const CATEGORY_COLUMNS: ActualCostCategory[] = ACTUAL_COST_CATEGORIES;
+
+function categoryHeaders(): CsvCell[] {
+  return CATEGORY_COLUMNS.map((cat) => `${ACTUAL_COST_CATEGORY_LABELS[cat]} (JMD)`);
+}
+
+/** One cell per fixed category column, in `CATEGORY_COLUMNS` order — a category absent from `byCategory` (no cost data) is emitted as 0, not blank, so every row sums cleanly across the category columns. */
+function categoryCells(byCategory: Partial<Record<ActualCostCategory, number>>): CsvCell[] {
+  return CATEGORY_COLUMNS.map((cat) => round2(byCategory[cat] ?? 0));
+}
+
 export function pnlToCsvRows(monthly: PnlMonthRow[], byOrder: PnlOrderRow[], range: ReportDateRange): CsvCell[][] {
   const rows: CsvCell[][] = titleBlock("Veridan — Profit & Loss (cash basis)", range);
 
   rows.push(["By month"]);
-  rows.push(["Month", "Revenue (JMD)", "Cost (JMD)", "Gross profit (JMD)", "Margin (%)", "Unconverted cost (USD)"]);
+  rows.push([
+    "Month",
+    "Revenue (JMD)",
+    "Cost (JMD)",
+    ...categoryHeaders(),
+    "Gross profit (JMD)",
+    "Margin (%)",
+    "Unconverted cost (USD)",
+  ]);
   for (const m of monthly) {
     rows.push([
       m.monthKey,
       round2(m.revenueJmd),
       round2(m.costJmd),
+      ...categoryCells(m.byCategory),
       round2(m.grossProfitJmd),
       round1(m.marginPct),
       round2(m.unconvertedCostUsd),
@@ -55,12 +78,21 @@ export function pnlToCsvRows(monthly: PnlMonthRow[], byOrder: PnlOrderRow[], ran
 
   rows.push([]);
   rows.push(["By order"]);
-  rows.push(["Quote ref", "Revenue (JMD)", "Cost (JMD)", "Gross profit (JMD)", "Margin (%)", "Unconverted cost (USD)"]);
+  rows.push([
+    "Quote ref",
+    "Revenue (JMD)",
+    "Cost (JMD)",
+    ...categoryHeaders(),
+    "Gross profit (JMD)",
+    "Margin (%)",
+    "Unconverted cost (USD)",
+  ]);
   for (const o of byOrder) {
     rows.push([
       o.quoteRef,
       round2(o.revenueJmd),
       round2(o.costJmd),
+      ...categoryCells(o.byCategory),
       round2(o.grossProfitJmd),
       round1(o.marginPct),
       round2(o.unconvertedCostUsd),

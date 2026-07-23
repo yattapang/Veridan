@@ -58,12 +58,43 @@ export function costAmountJmd(cost: PnlCostInput, rateByOrderId: OrderRateLookup
   return null;
 }
 
+/** Adds `amount` to `map[category]`, creating the entry on first touch — categories with no cost never appear (not zero-filled), so the UI can iterate `Object.keys` to show only categories that actually have data. */
+function addToCategoryMap(
+  map: Partial<Record<ActualCostCategory, number>>,
+  category: ActualCostCategory,
+  amount: number,
+): void {
+  map[category] = (map[category] ?? 0) + amount;
+}
+
+/**
+ * Merges category subtotals across multiple rows (e.g. every month, or every
+ * order) into one portfolio-level total per category — the source for a
+ * "cost by category" summary section. Only categories present in at least
+ * one input row appear in the result.
+ */
+export function mergeCategoryTotals(
+  rows: { byCategory: Partial<Record<ActualCostCategory, number>> }[],
+): Partial<Record<ActualCostCategory, number>> {
+  const totals: Partial<Record<ActualCostCategory, number>> = {};
+  for (const row of rows) {
+    for (const [category, amount] of Object.entries(row.byCategory) as [ActualCostCategory, number][]) {
+      addToCategoryMap(totals, category, amount);
+    }
+  }
+  return totals;
+}
+
 export interface PnlMonthRow {
   monthKey: string;
   revenueJmd: number;
   costJmd: number;
   /** Sum of any cost row that could not be converted to JMD (USD-only, no known order rate) — surfaced so the UI can flag an incomplete total rather than silently under-reporting cost. */
   unconvertedCostUsd: number;
+  /** JMD cost subtotal per category — sums to `costJmd`. Only categories with at least one converted cost row appear (not zero-filled). */
+  byCategory: Partial<Record<ActualCostCategory, number>>;
+  /** USD subtotal per category for cost rows that could not be converted (mirrors `unconvertedCostUsd`, broken out by category so an incomplete category total is surfaced rather than silently absorbed into "other"). */
+  unconvertedUsdByCategory: Partial<Record<ActualCostCategory, number>>;
   grossProfitJmd: number;
   marginPct: number | null;
 }
@@ -89,15 +120,23 @@ export function computePnlByMonth(
 
   const costByMonth = new Map<string, number>();
   const unconvertedByMonth = new Map<string, number>();
+  const categoryByMonth = new Map<string, Partial<Record<ActualCostCategory, number>>>();
+  const unconvertedCategoryByMonth = new Map<string, Partial<Record<ActualCostCategory, number>>>();
   for (const c of costs) {
     if (!isWithinReportRange(c.incurredDateIso, range)) continue;
     const key = monthKeyFromDateOnly(c.incurredDateIso);
     const jmd = costAmountJmd(c, rateByOrderId);
     if (jmd == null) {
       unconvertedByMonth.set(key, (unconvertedByMonth.get(key) ?? 0) + (c.amountUsd ?? 0));
+      const catMap = unconvertedCategoryByMonth.get(key) ?? {};
+      addToCategoryMap(catMap, c.category, c.amountUsd ?? 0);
+      unconvertedCategoryByMonth.set(key, catMap);
       continue;
     }
     costByMonth.set(key, (costByMonth.get(key) ?? 0) + jmd);
+    const catMap = categoryByMonth.get(key) ?? {};
+    addToCategoryMap(catMap, c.category, jmd);
+    categoryByMonth.set(key, catMap);
   }
 
   return monthKeysInRange(range).map((monthKey) => {
@@ -109,6 +148,8 @@ export function computePnlByMonth(
       revenueJmd,
       costJmd,
       unconvertedCostUsd: unconvertedByMonth.get(monthKey) ?? 0,
+      byCategory: categoryByMonth.get(monthKey) ?? {},
+      unconvertedUsdByCategory: unconvertedCategoryByMonth.get(monthKey) ?? {},
       grossProfitJmd,
       marginPct: revenueJmd > 0 ? (grossProfitJmd / revenueJmd) * 100 : null,
     };
@@ -122,6 +163,10 @@ export interface PnlOrderRow {
   revenueJmd: number;
   costJmd: number;
   unconvertedCostUsd: number;
+  /** JMD cost subtotal per category — sums to `costJmd`. Only categories with at least one converted cost row appear (not zero-filled). */
+  byCategory: Partial<Record<ActualCostCategory, number>>;
+  /** USD subtotal per category for cost rows that could not be converted (mirrors `unconvertedCostUsd`, broken out by category). */
+  unconvertedUsdByCategory: Partial<Record<ActualCostCategory, number>>;
   grossProfitJmd: number;
   marginPct: number | null;
 }
@@ -144,7 +189,17 @@ export function computePnlByOrder(
   function ensureRow(orderId: string, quoteRef: string): PnlOrderRow {
     let row = rowByOrder.get(orderId);
     if (!row) {
-      row = { orderId, quoteRef, revenueJmd: 0, costJmd: 0, unconvertedCostUsd: 0, grossProfitJmd: 0, marginPct: null };
+      row = {
+        orderId,
+        quoteRef,
+        revenueJmd: 0,
+        costJmd: 0,
+        unconvertedCostUsd: 0,
+        byCategory: {},
+        unconvertedUsdByCategory: {},
+        grossProfitJmd: 0,
+        marginPct: null,
+      };
       rowByOrder.set(orderId, row);
     }
     return row;
@@ -169,9 +224,11 @@ export function computePnlByOrder(
     const jmd = costAmountJmd(c, rateByOrderId);
     if (jmd == null) {
       row.unconvertedCostUsd += c.amountUsd ?? 0;
+      addToCategoryMap(row.unconvertedUsdByCategory, c.category, c.amountUsd ?? 0);
       continue;
     }
     row.costJmd += jmd;
+    addToCategoryMap(row.byCategory, c.category, jmd);
   }
 
   for (const row of rowByOrder.values()) {

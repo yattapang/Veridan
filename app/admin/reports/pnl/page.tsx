@@ -2,8 +2,10 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { InstructiveMessage } from "@/components/admin/InstructiveMessage";
 import { formatJmd, formatPct, formatUsd } from "@/lib/quotes/format";
+import { ACTUAL_COST_CATEGORY_LABELS } from "@/lib/orders/format";
+import type { ActualCostCategory } from "@/lib/supabase/types";
 import { yearToDateRange, type ReportDateRange } from "@/lib/reports/period";
-import { computePnlByMonth, computePnlByOrder } from "@/lib/reports/pnl";
+import { computePnlByMonth, computePnlByOrder, mergeCategoryTotals } from "@/lib/reports/pnl";
 import { loadPnlData } from "@/lib/reports/load";
 import { DateRangeFilter } from "../DateRangeFilter";
 import { ExportLinks } from "../ExportLinks";
@@ -15,6 +17,22 @@ export const metadata = {
 function firstParam(value: string | string[] | undefined): string {
   if (Array.isArray(value)) return value[0] ?? "";
   return value ?? "";
+}
+
+/** `byCategory` sorted by amount descending, as `[category, amountJmd]` pairs — the shared ordering for both the portfolio summary table and each order row's compact top-categories display. */
+function sortedCategoryEntries(
+  byCategory: Partial<Record<ActualCostCategory, number>>,
+): [ActualCostCategory, number][] {
+  return (Object.entries(byCategory) as [ActualCostCategory, number][]).sort((a, b) => b[1] - a[1]);
+}
+
+/** A compact "Hardware J$12,000, Freight J$4,000 +2 more" summary for a table cell, so the by-order table can surface category detail without a column per category. */
+function topCategoriesSummary(byCategory: Partial<Record<ActualCostCategory, number>>, max = 2): string {
+  const entries = sortedCategoryEntries(byCategory);
+  if (entries.length === 0) return "—";
+  const shown = entries.slice(0, max).map(([cat, amount]) => `${ACTUAL_COST_CATEGORY_LABELS[cat]} ${formatJmd(amount)}`);
+  const remainder = entries.length - shown.length;
+  return remainder > 0 ? `${shown.join(", ")} +${remainder} more` : shown.join(", ");
 }
 
 export default async function PnlReportPage({
@@ -66,6 +84,7 @@ export default async function PnlReportPage({
   const totalCost = monthly.reduce((s, r) => s + r.costJmd, 0);
   const totalGrossProfit = totalRevenue - totalCost;
   const totalUnconverted = monthly.reduce((s, r) => s + r.unconvertedCostUsd, 0);
+  const categoryTotals = sortedCategoryEntries(mergeCategoryTotals(monthly));
 
   return (
     <div className="max-w-6xl">
@@ -120,6 +139,40 @@ export default async function PnlReportPage({
         </div>
       )}
 
+      {/* Cost by category */}
+      <section className="mt-8">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">Cost by category</h2>
+        {categoryTotals.length === 0 ? (
+          <InstructiveMessage
+            title="No categorized cost data in this range"
+            body="Actual costs recorded within this date range will appear here broken out by category."
+          />
+        ) : (
+          <div className="overflow-x-auto rounded-md border border-veridan-warm-gray-light bg-white">
+            <table className="w-full min-w-[480px] table-auto border-collapse text-left text-sm">
+              <thead>
+                <tr className="border-b border-veridan-warm-gray-light bg-veridan-warm-gray-pale/60 text-[10px] font-semibold uppercase tracking-wide text-veridan-warm-gray">
+                  <th className="px-3 py-2">Category</th>
+                  <th className="px-3 py-2 text-right">Cost</th>
+                  <th className="px-3 py-2 text-right">Share of total cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                {categoryTotals.map(([category, amountJmd]) => (
+                  <tr key={category} className="border-b border-veridan-warm-gray-light last:border-b-0">
+                    <td className="px-3 py-2 text-veridan-ink">{ACTUAL_COST_CATEGORY_LABELS[category]}</td>
+                    <td className="px-3 py-2 text-right text-veridan-ink">{formatJmd(amountJmd, 2)}</td>
+                    <td className="px-3 py-2 text-right text-veridan-warm-gray">
+                      {totalCost > 0 ? formatPct(Math.round((amountJmd / totalCost) * 1000) / 10) : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
       {/* Monthly */}
       <section className="mt-8">
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">By month</h2>
@@ -161,12 +214,13 @@ export default async function PnlReportPage({
           />
         ) : (
           <div className="overflow-x-auto rounded-md border border-veridan-warm-gray-light bg-white">
-            <table className="w-full min-w-[640px] table-auto border-collapse text-left text-sm">
+            <table className="w-full min-w-[820px] table-auto border-collapse text-left text-sm">
               <thead>
                 <tr className="border-b border-veridan-warm-gray-light bg-veridan-warm-gray-pale/60 text-[10px] font-semibold uppercase tracking-wide text-veridan-warm-gray">
                   <th className="px-3 py-2">Order</th>
                   <th className="px-3 py-2 text-right">Revenue</th>
                   <th className="px-3 py-2 text-right">Cost</th>
+                  <th className="px-3 py-2">Top cost categories</th>
                   <th className="px-3 py-2 text-right">Gross profit</th>
                   <th className="px-3 py-2 text-right">Margin</th>
                 </tr>
@@ -184,6 +238,7 @@ export default async function PnlReportPage({
                     </td>
                     <td className="px-3 py-2 text-right text-veridan-ink">{formatJmd(row.revenueJmd, 2)}</td>
                     <td className="px-3 py-2 text-right text-veridan-ink">{formatJmd(row.costJmd, 2)}</td>
+                    <td className="px-3 py-2 text-veridan-warm-gray">{topCategoriesSummary(row.byCategory)}</td>
                     <td className="px-3 py-2 text-right font-medium text-veridan-ink">{formatJmd(row.grossProfitJmd, 2)}</td>
                     <td className="px-3 py-2 text-right text-veridan-ink">
                       {row.marginPct != null ? formatPct(Math.round(row.marginPct * 10) / 10) : "—"}
