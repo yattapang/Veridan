@@ -67,9 +67,10 @@ export default async function PriceFilesPage() {
     <div className="max-w-3xl">
       <h1 className="text-2xl font-semibold text-veridan-ink">Price Files</h1>
       <p className="mt-2 text-sm text-veridan-warm-gray">
-        Upload a supplier quote or price list (PDF, Excel, CSV, or a photo) to
-        seed the extraction pipeline. Extraction and review land in a later
-        build — for now, an upload records the file and its metadata.
+        Upload a supplier price file, then run extraction to pull its line
+        items into a review screen (accept, edit, or reject each proposed
+        line against the Hardware Library) before optionally seeding a draft
+        quote.
       </p>
 
       <section className="mt-8 rounded-md border border-veridan-warm-gray-light bg-white px-5 py-5">

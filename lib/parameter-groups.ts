@@ -37,7 +37,7 @@ export const PARAMETER_GROUPS: { label: string; keys: string[] }[] = [
   },
   {
     label: "Invoicing",
-    keys: ["gct_enabled", "gct_rate_pct"],
+    keys: ["gct_enabled", "gct_rate_pct", "invoice_payment_instructions"],
   },
   {
     label: "Company Details",

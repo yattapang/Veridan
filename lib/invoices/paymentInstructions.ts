@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { invoicePaymentInstructions as fallback } from "@/lib/site-content";
 import {
   paymentInstructionFieldsConfigured,
+  paymentInstructionsFromTableValue,
   type PaymentInstructions,
 } from "./paymentInstructionsCore";
 
@@ -29,30 +30,7 @@ export async function loadPaymentInstructions(
     .maybeSingle();
 
   const table = (data?.value as { value?: Record<string, unknown> } | null)?.value;
-  if (!table || typeof table !== "object") {
-    return {
-      bankName: fallback.bankName,
-      accountName: fallback.accountName,
-      accountNumber: fallback.accountNumber,
-      branch: fallback.branch,
-      routingOrSwift: fallback.routingOrSwift,
-      note: fallback.note,
-    };
-  }
-
-  const str = (key: string, fb: string): string => {
-    const v = table[key];
-    return typeof v === "string" && v.trim() !== "" ? v : fb;
-  };
-
-  return {
-    bankName: str("bank_name", fallback.bankName),
-    accountName: str("account_name", fallback.accountName),
-    accountNumber: str("account_number", fallback.accountNumber),
-    branch: str("branch", fallback.branch),
-    routingOrSwift: str("routing_or_swift", fallback.routingOrSwift),
-    note: str("note", fallback.note),
-  };
+  return paymentInstructionsFromTableValue(table, fallback);
 }
 
 /** Convenience: load + evaluate the send gate in one call. */

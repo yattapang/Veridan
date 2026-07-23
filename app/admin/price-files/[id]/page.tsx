@@ -38,10 +38,9 @@ function Field({ label, value }: { label: string; value: string | null | undefin
 }
 
 /**
- * Honest placeholder detail page (Task 36). Shows the upload's metadata and
- * a signed-URL file download; extraction (Task 37) and the review screen
- * (Task 39) land in later builds. No buttons that pretend to trigger work
- * this build doesn't do.
+ * Price file detail page (Task 36). Shows the upload's metadata and a
+ * signed-URL file download, plus extraction status (Task 37) and a link
+ * into the line-item review screen (Task 39) once extraction has run.
  */
 export default async function PriceFileDetailPage({
   params,
