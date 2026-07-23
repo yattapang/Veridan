@@ -2,7 +2,11 @@ import "server-only";
 
 import { unstable_cache } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { createClient } from "@/lib/supabase/server";
+// Cookie-FREE anon client on purpose: a cookie-bound client would force every
+// marketing route to render dynamically (Phase 3A review MAJOR-1). site_content
+// is public and session-independent, so this keeps the pages statically
+// prerenderable while unstable_cache + revalidateTag handle freshness.
+import { createPublicContentClient } from "@/lib/supabase/publicClient";
 import {
   siteMeta as siteMetaFallback,
   contactInfo as contactInfoFallback,
@@ -105,7 +109,7 @@ function makeSectionLoader<T>(
   return async function load(): Promise<T> {
     let supabase: SupabaseClient;
     try {
-      supabase = await createClient();
+      supabase = createPublicContentClient();
     } catch {
       // Supabase env vars not configured — same fallback discipline as
       // every other loader in this repo (e.g. app/admin/parameters/page.tsx).
