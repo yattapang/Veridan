@@ -23,6 +23,21 @@ export function StatusPanel({ orderId, status }: { orderId: string; status: Orde
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
+  // Keep `target` in sync with the currently-valid options. This client
+  // component instance PERSISTS across the server re-render that follows a
+  // successful transition (revalidatePath), so without this reset `target`
+  // would hold a now-invalid status (e.g. it stayed "delivered" after the
+  // order actually became "delivered", making the dropdown display "Closed"
+  // while submitting "delivered" → "cannot move from delivered back to
+  // delivered"). Adjusting state during render is React's documented pattern
+  // for resetting state when a prop changes; it converges in one extra render
+  // because options[0] is always a member of `options`.
+  if (target !== "" && !options.includes(target as OrderStatus)) {
+    setTarget(options[0] ?? "");
+  } else if (target === "" && options.length > 0) {
+    setTarget(options[0]);
+  }
+
   if (options.length === 0) {
     return <p className="text-sm text-veridan-warm-gray">This order is closed — no further status changes.</p>;
   }
