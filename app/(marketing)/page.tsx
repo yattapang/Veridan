@@ -15,6 +15,7 @@ import {
   getServiceLines,
   getTrustSignals,
   getBrandsSupplied,
+  getTestimonials,
 } from "@/lib/site-content-db/loader";
 
 // Async so an admin-edited description shows up in <meta name="description">
@@ -29,11 +30,12 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function HomePage() {
-  const [siteMeta, serviceLines, trustSignals, brandsSupplied] = await Promise.all([
+  const [siteMeta, serviceLines, trustSignals, brandsSupplied, testimonials] = await Promise.all([
     getSiteMeta(),
     getServiceLines(),
     getTrustSignals(),
     getBrandsSupplied(),
+    getTestimonials(),
   ]);
 
   return (
@@ -185,6 +187,31 @@ export default async function HomePage() {
           </div>
         </Container>
       </section>
+
+      {/* Testimonials — rendered only when at least one exists (stays clean
+          until a founder adds one from /admin/content). */}
+      {testimonials.length > 0 && (
+        <section className="bg-veridan-warm-gray-pale py-20 sm:py-28">
+          <Container>
+            <SectionHeading kicker="In Their Words" title="What our clients say." align="center" />
+            <div className="mt-14 grid gap-8 md:grid-cols-2 lg:mx-auto lg:max-w-4xl">
+              {testimonials.map((t, i) => (
+                <figure
+                  key={`${t.attribution}-${i}`}
+                  className="flex flex-col justify-between border border-veridan-warm-gray-light bg-veridan-paper p-8"
+                >
+                  <blockquote className="text-lg leading-relaxed text-veridan-ink">
+                    &ldquo;{t.quote}&rdquo;
+                  </blockquote>
+                  <figcaption className="mt-6 text-sm font-semibold uppercase tracking-wide text-veridan-accent-text">
+                    {t.attribution}
+                  </figcaption>
+                </figure>
+              ))}
+            </div>
+          </Container>
+        </section>
+      )}
 
       {/* Closing CTA */}
       <section className="bg-veridan-ink py-20 text-veridan-paper sm:py-24">
