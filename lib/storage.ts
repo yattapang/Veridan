@@ -171,3 +171,80 @@ export async function signPriceFileUrl(
     return null;
   }
 }
+
+/**
+ * Uploads an optional spec-sheet / reference document to the private
+ * `article-source-uploads` bucket (Phase 3B, Plan §2.2/§2.3 — fed to the AI
+ * drafter as a document content block). Path convention:
+ * `<article-id>/<timestamp>-<original-filename>`, mirroring
+ * uploadPriceFile's `<uuid>/<filename>` shape. Founders are `authenticated`,
+ * which has full CRUD on this bucket per
+ * supabase/migrations/20260723000001_articles_workspace.sql.
+ */
+export async function uploadArticleSourceFile(
+  supabase: SupabaseClient,
+  articleId: string,
+  file: File
+): Promise<{ path: string | null; error: string | null }> {
+  const path = `${articleId}/${Date.now()}-${file.name}`;
+  const { error } = await supabase.storage.from("article-source-uploads").upload(path, file, {
+    contentType: file.type || undefined,
+    upsert: false,
+  });
+  if (error) return { path: null, error: error.message };
+  return { path, error: null };
+}
+
+/**
+ * Signs a URL for a previously uploaded article source file, for the
+ * editor's "attached file" link. Best-effort, same pattern as
+ * signPriceFileUrl.
+ */
+export async function signArticleSourceFileUrl(
+  supabase: SupabaseClient,
+  path: string | null | undefined,
+  expiresInSeconds = 60 * 60
+): Promise<string | null> {
+  if (!path) return null;
+  try {
+    const { data, error } = await supabase.storage
+      .from("article-source-uploads")
+      .createSignedUrl(path, expiresInSeconds);
+    if (error || !data) return null;
+    return data.signedUrl;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Uploads a hero image to the PUBLIC `article-hero-images` bucket (Phase 3B
+ * — the one deliberate public bucket in this app; see the migration's
+ * header comment for why). Path convention: `<article-id>/<timestamp>-
+ * <original-filename>`. Founders are `authenticated`, which has full CRUD
+ * on this bucket; `upsert: true` so re-uploading a new hero image for the
+ * same article under a fresh timestamped path never collides.
+ */
+export async function uploadArticleHeroImage(
+  supabase: SupabaseClient,
+  articleId: string,
+  file: File
+): Promise<{ path: string | null; error: string | null }> {
+  const path = `${articleId}/${Date.now()}-${file.name}`;
+  const { error } = await supabase.storage.from("article-hero-images").upload(path, file, {
+    contentType: file.type || undefined,
+    upsert: true,
+  });
+  if (error) return { path: null, error: error.message };
+  return { path, error: null };
+}
+
+/** Public URL for a hero image, from a founder-authenticated session (no signing needed — the bucket is public). */
+export function articleHeroImagePublicUrl(
+  supabase: SupabaseClient,
+  path: string | null | undefined
+): string | null {
+  if (!path) return null;
+  const { data } = supabase.storage.from("article-hero-images").getPublicUrl(path);
+  return data.publicUrl ?? null;
+}

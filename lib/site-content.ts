@@ -54,11 +54,16 @@ export const enquiryNotificationRecipients = [
   "kaydean@veridanlimited.com",
 ] as const;
 
+// Phase 3B (2026-07-23): "Articles" added — a structural nav change, not
+// content (Plan §2.5: "Add 'Articles' to the marketing nav ... this IS a
+// structural nav change, acceptable here"). navLinks itself stays hardcoded
+// per the Phase 3A exclusion above; only its entries changed.
 export const navLinks = [
   { href: "/", label: "Home" },
   { href: "/new-construction", label: "New Construction" },
   { href: "/retrofit", label: "Retrofit & Replacement" },
   { href: "/products", label: "Products" },
+  { href: "/articles", label: "Articles" },
   { href: "/about", label: "About" },
   { href: "/contact", label: "Contact" },
 ] as const;

@@ -763,3 +763,65 @@ export interface MarginFlagSummary {
   landedCostUsd: number;
   clientPriceUsd: number;
 }
+
+// ---------------------------------------------------------------------------
+// Phase 3B — Articles (§9.4 base stub in 20260713000001_schema.sql, extended
+// additively by 20260723000001_articles_workspace.sql). See lib/articles/.
+// ---------------------------------------------------------------------------
+
+export type ArticleStatus = "draft" | "review" | "published";
+export const ARTICLE_STATUSES: ArticleStatus[] = ["draft", "review", "published"];
+
+/** §2.2 articles (combined base + Phase 3B delta shape — the delta is authoritative). */
+export interface ArticleRow {
+  id: string;
+  title: string;
+  slug: string;
+  body: string | null;
+  status: ArticleStatus;
+  author: string | null;
+  published_at: string | null;
+  linkedin_cross_posted: boolean;
+  /** Phase 3B additive column. */
+  excerpt: string | null;
+  /** Phase 3B additive column — free text; see lib/articles/categories.ts for the suggested set. */
+  category: string | null;
+  /** Phase 3B additive column — Storage path within the public article-hero-images bucket. */
+  hero_image_path: string | null;
+  /** Phase 3B additive column — falls back to title when null. */
+  seo_title: string | null;
+  /** Phase 3B additive column — falls back to excerpt when null. */
+  seo_description: string | null;
+  /** Phase 3B additive column — provenance only, NEVER rendered publicly (founder decision 2026-07-23). */
+  ai_assisted: boolean;
+  /** Phase 3B additive column — founder's drafting notes / spec-sheet reference, audit only. */
+  source_notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Article row joined with its author for admin display. */
+export interface ArticleWithAuthor extends ArticleRow {
+  users: { id: string; email: string; display_name: string | null } | null;
+}
+
+export type ArticleAiInstruction = "draft" | "expand" | "rewrite";
+export const ARTICLE_AI_INSTRUCTIONS: ArticleAiInstruction[] = ["draft", "expand", "rewrite"];
+
+/**
+ * §2.2 article_ai_draft_log — provenance/audit trail for EVERY AI-draft
+ * call, whether or not the founder accepts the output. The AI-draft endpoint
+ * writes ONLY to this table (GUARDRAIL, Plan §2.3) — never to articles.body
+ * or articles.status.
+ */
+export interface ArticleAiDraftLogRow {
+  id: string;
+  article_id: string;
+  instruction: ArticleAiInstruction;
+  notes: string | null;
+  source_file_path: string | null;
+  model: string | null;
+  response_text: string | null;
+  created_by: string | null;
+  created_at: string;
+}

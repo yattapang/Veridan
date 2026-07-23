@@ -19,6 +19,7 @@ const NAV_ITEMS: { label: string; href: string }[] = [
   { label: "Price Files", href: "/admin/price-files" },
   { label: "Parameters", href: "/admin/parameters" },
   { label: "Content", href: "/admin/content" },
+  { label: "Articles", href: "/admin/articles" },
   { label: "Overrides", href: "/admin/overrides" },
 ];
 
