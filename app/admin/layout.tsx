@@ -9,10 +9,13 @@ import { SignOutButton } from "@/components/admin/SignOutButton";
 export const dynamic = "force-dynamic";
 
 /**
- * Authenticated admin shell (Task 5). Middleware already protects
- * `/admin/*` (see middleware.ts), but this layout re-checks auth
- * server-side as defense-in-depth — the middleware matcher or a future
- * refactor could otherwise silently leave a route unprotected.
+ * Authenticated admin shell (Task 5). This layout's server-side
+ * `getCurrentUser()` check is the single authoritative auth gate for every
+ * `/admin/*` route (there is no middleware/proxy layer — an earlier comment
+ * referenced one that does not exist; Phase 3C review MINOR-1). Because
+ * `force-dynamic` above runs this on every request and Server Actions each
+ * re-check `getCurrentUser()` independently, this one gate is sufficient;
+ * keep it here and do not assume any other layer protects admin routes.
  */
 export default async function AdminLayout({
   children,
