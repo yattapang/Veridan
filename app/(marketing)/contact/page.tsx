@@ -2,7 +2,9 @@ import type { Metadata } from "next";
 import { PageHero } from "@/components/PageHero";
 import { Container } from "@/components/Container";
 import { ButtonLink } from "@/components/Button";
-import { contactInfo, quoteRequestRoutes } from "@/lib/site-content";
+// quoteRequestRoutes stays hardcoded (Plan §1.4 exclusion) — static import.
+import { quoteRequestRoutes } from "@/lib/site-content";
+import { getContactInfo } from "@/lib/site-content-db/loader";
 
 export const metadata: Metadata = {
   title: "Contact",
@@ -11,7 +13,9 @@ export const metadata: Metadata = {
   alternates: { canonical: "/contact" },
 };
 
-export default function ContactPage() {
+export default async function ContactPage() {
+  const contactInfo = await getContactInfo();
+
   return (
     <>
       <PageHero

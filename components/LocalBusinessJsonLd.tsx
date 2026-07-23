@@ -1,4 +1,4 @@
-import { siteMeta, contactInfo } from "@/lib/site-content";
+import { getSiteMeta, getContactInfo } from "@/lib/site-content-db/loader";
 
 /**
  * LocalBusiness structured data (PRD §5.2). Rendered on the home page only.
@@ -6,7 +6,9 @@ import { siteMeta, contactInfo } from "@/lib/site-content";
  * TODO(founder input needed): add a precise street address / postal code
  * here once the founders confirm what should be publicly listed.
  */
-export function LocalBusinessJsonLd() {
+export async function LocalBusinessJsonLd() {
+  const [siteMeta, contactInfo] = await Promise.all([getSiteMeta(), getContactInfo()]);
+
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "LocalBusiness",

@@ -1,10 +1,13 @@
 import Link from "next/link";
 import { Wordmark } from "@/components/Wordmark";
 import { Container } from "@/components/Container";
-import { navLinks, siteMeta, contactInfo } from "@/lib/site-content";
+// navLinks stays hardcoded (Plan §1.4 exclusion) — static import.
+import { navLinks } from "@/lib/site-content";
+import { getSiteMeta, getContactInfo } from "@/lib/site-content-db/loader";
 
-export function SiteFooter() {
+export async function SiteFooter() {
   const year = new Date().getFullYear();
+  const [siteMeta, contactInfo] = await Promise.all([getSiteMeta(), getContactInfo()]);
 
   return (
     <footer className="border-t border-veridan-paper/10 bg-veridan-ink text-veridan-paper">

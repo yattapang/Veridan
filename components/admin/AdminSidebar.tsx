@@ -18,6 +18,7 @@ const NAV_ITEMS: { label: string; href: string }[] = [
   { label: "Item Groups", href: "/admin/item-groups" },
   { label: "Price Files", href: "/admin/price-files" },
   { label: "Parameters", href: "/admin/parameters" },
+  { label: "Content", href: "/admin/content" },
   { label: "Overrides", href: "/admin/overrides" },
 ];
 

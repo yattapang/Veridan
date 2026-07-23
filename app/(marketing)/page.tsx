@@ -4,22 +4,38 @@ import { Container } from "@/components/Container";
 import { ButtonLink } from "@/components/Button";
 import { SectionHeading } from "@/components/SectionHeading";
 import { LocalBusinessJsonLd } from "@/components/LocalBusinessJsonLd";
+// originsSupplied and primaryCta are NOT part of the Phase 3A site_content
+// DB set (Plan §1.4: only 9 named sections migrated; primaryCta is
+// structural/routing and stays hardcoded like navLinks/quoteRequestRoutes;
+// originsSupplied simply isn't one of the seeded sections) — both stay
+// static imports.
+import { originsSupplied, primaryCta } from "@/lib/site-content";
 import {
-  siteMeta,
-  serviceLines,
-  trustSignals,
-  brandsSupplied,
-  originsSupplied,
-  primaryCta,
-} from "@/lib/site-content";
+  getSiteMeta,
+  getServiceLines,
+  getTrustSignals,
+  getBrandsSupplied,
+} from "@/lib/site-content-db/loader";
 
-export const metadata: Metadata = {
-  title: "Home",
-  description: siteMeta.description,
-  alternates: { canonical: "/" },
-};
+// Async so an admin-edited description shows up in <meta name="description">
+// without a deploy, same as the rendered page content below.
+export async function generateMetadata(): Promise<Metadata> {
+  const siteMeta = await getSiteMeta();
+  return {
+    title: "Home",
+    description: siteMeta.description,
+    alternates: { canonical: "/" },
+  };
+}
 
-export default function HomePage() {
+export default async function HomePage() {
+  const [siteMeta, serviceLines, trustSignals, brandsSupplied] = await Promise.all([
+    getSiteMeta(),
+    getServiceLines(),
+    getTrustSignals(),
+    getBrandsSupplied(),
+  ]);
+
   return (
     <>
       <LocalBusinessJsonLd />

@@ -2,7 +2,9 @@ import type { Metadata } from "next";
 import { PageHero } from "@/components/PageHero";
 import { Container } from "@/components/Container";
 import { ButtonLink } from "@/components/Button";
-import { productCategories, primaryCta } from "@/lib/site-content";
+// primaryCta stays hardcoded (Plan §1.4 exclusion) — static import.
+import { primaryCta } from "@/lib/site-content";
+import { getProductCategories } from "@/lib/site-content-db/loader";
 
 export const metadata: Metadata = {
   title: "Products — Commercial Door Hardware",
@@ -11,7 +13,9 @@ export const metadata: Metadata = {
   alternates: { canonical: "/products" },
 };
 
-export default function ProductsPage() {
+export default async function ProductsPage() {
+  const productCategories = await getProductCategories();
+
   return (
     <>
       <PageHero

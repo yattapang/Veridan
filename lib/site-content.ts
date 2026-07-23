@@ -1,14 +1,22 @@
 /**
  * Marketing site content.
  *
- * TODO(Phase 1.5, PRD §5.3): this file holds all "changeable" marketing copy
- * (testimonials, brand list, taglines, contact details) as hardcoded typed
- * constants for Phase 1. The PRD flags this content as eventually editable
- * from the admin via a `site_content` DB table (see Build Plan §1.18-style
- * future table, PRD §5.3: "Marketing copy that will change ... lives in the
- * database and is editable from the admin"). When that table ships, replace
- * the exports below with a data-fetching layer that reads from Supabase,
- * keeping the same shapes so components don't need to change.
+ * FALLBACK ONLY since Phase 3A (2026-07-22): 9 of the sections below —
+ * siteMeta (editable subset), contactInfo, brandsSupplied, trustSignals,
+ * testimonials, serviceLines, productCategories, founders, aboutStory — are
+ * now admin-editable from /admin/content, backed by the `site_content` table
+ * (supabase/migrations/20260722000001_site_content.sql) and read through
+ * lib/site-content-db/loader.ts. The exports below are used ONLY as the
+ * fallback when a DB row is missing, a Supabase call errors, or a row's
+ * shape doesn't validate — same discipline as invoicePaymentInstructions
+ * below / lib/invoices/paymentInstructions.ts. Do not delete or reshape
+ * these constants; marketing pages depend on them staying byte-identical to
+ * what the seed migration copied.
+ *
+ * navLinks, primaryCta, and quoteRequestRoutes are DELIBERATELY excluded
+ * from that migration (Phase3 Plan §1.4: routing/structural, not "content
+ * that will change") and stay hardcoded here permanently — components keep
+ * importing them directly from this file, no loader involved.
  */
 
 export const siteMeta = {

@@ -3,7 +3,9 @@ import { PageHero } from "@/components/PageHero";
 import { SectionHeading } from "@/components/SectionHeading";
 import { Container } from "@/components/Container";
 import { ButtonLink } from "@/components/Button";
-import { founders, aboutStory, primaryCta } from "@/lib/site-content";
+// primaryCta stays hardcoded (Plan §1.4 exclusion) — static import.
+import { primaryCta } from "@/lib/site-content";
+import { getFounders, getAboutStory } from "@/lib/site-content-db/loader";
 
 export const metadata: Metadata = {
   title: "About",
@@ -12,7 +14,9 @@ export const metadata: Metadata = {
   alternates: { canonical: "/about" },
 };
 
-export default function AboutPage() {
+export default async function AboutPage() {
+  const [founders, aboutStory] = await Promise.all([getFounders(), getAboutStory()]);
+
   return (
     <>
       <PageHero
