@@ -45,29 +45,38 @@ export function SiteHeader() {
           </ButtonLink>
         </div>
 
+        {/* The bare bars weren't obviously a menu to every visitor — pairing
+            them with a visible "Menu"/"Close" label and a button outline makes
+            the affordance unmistakable (the label also serves as the button's
+            accessible name, so no aria-label is needed). */}
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
           aria-controls="mobile-nav-menu"
-          aria-label="Toggle navigation menu"
-          className="flex h-11 w-11 flex-col items-center justify-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-veridan-accent focus-visible:ring-offset-2 xl:hidden"
+          className="flex h-11 items-center gap-2 rounded-md border border-veridan-warm-gray-light px-3 text-sm font-medium uppercase tracking-wide text-veridan-ink transition-colors hover:border-veridan-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-veridan-accent focus-visible:ring-offset-2 xl:hidden"
         >
           <span
-            className={`block h-px w-6 bg-veridan-ink transition-transform ${
-              open ? "translate-y-2 rotate-45" : ""
-            }`}
-          />
-          <span
-            className={`block h-px w-6 bg-veridan-ink transition-opacity ${
-              open ? "opacity-0" : "opacity-100"
-            }`}
-          />
-          <span
-            className={`block h-px w-6 bg-veridan-ink transition-transform ${
-              open ? "-translate-y-2 -rotate-45" : ""
-            }`}
-          />
+            className="flex h-5 w-5 flex-col items-center justify-center gap-1.5"
+            aria-hidden="true"
+          >
+            <span
+              className={`block h-px w-5 bg-veridan-ink transition-transform ${
+                open ? "translate-y-2 rotate-45" : ""
+              }`}
+            />
+            <span
+              className={`block h-px w-5 bg-veridan-ink transition-opacity ${
+                open ? "opacity-0" : "opacity-100"
+              }`}
+            />
+            <span
+              className={`block h-px w-5 bg-veridan-ink transition-transform ${
+                open ? "-translate-y-2 -rotate-45" : ""
+              }`}
+            />
+          </span>
+          {open ? "Close" : "Menu"}
         </button>
       </Container>
 
