@@ -86,7 +86,11 @@ export type SiteMetaEditable = Pick<
   SiteMeta,
   "tagline" | "positioning" | "description" | "locality"
 >;
-export type ContactInfoEditable = ContactInfo;
+// `phone` is the one optional field on contact_info: legacy DB rows written
+// before this field existed won't have it at all, and resolveContactInfo
+// (lib/site-content-db/validation.ts) falls back per-field to the constant
+// rather than invalidating the whole section over it.
+export type ContactInfoEditable = Omit<ContactInfo, "phone"> & { phone?: string };
 export type BrandsSuppliedEditable = BrandsSupplied;
 export type TrustSignalEditable = TrustSignal;
 export type TrustSignalsEditable = TrustSignal[];

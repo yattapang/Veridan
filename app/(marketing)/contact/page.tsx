@@ -67,7 +67,7 @@ export default async function ContactPage() {
       </section>
 
       <section className="bg-veridan-warm-gray-pale py-16 sm:py-20">
-        <Container className="grid gap-10 sm:grid-cols-3">
+        <Container className="grid gap-10 sm:grid-cols-2 lg:grid-cols-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-widest text-veridan-warm-gray">
               Email
@@ -77,6 +77,17 @@ export default async function ContactPage() {
               className="mt-2 block text-lg font-medium text-veridan-ink hover:text-veridan-accent-text"
             >
               {contactInfo.email}
+            </a>
+          </div>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-widest text-veridan-warm-gray">
+              Call us
+            </p>
+            <a
+              href={`tel:+${contactInfo.phone.replace(/[^0-9]/g, "")}`}
+              className="mt-2 block text-lg font-medium text-veridan-ink hover:text-veridan-accent-text"
+            >
+              {contactInfo.phone}
             </a>
           </div>
           <div>

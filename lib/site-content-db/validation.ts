@@ -23,6 +23,7 @@
 import type {
   SiteMeta,
   ContactInfo,
+  ContactInfoEditable,
   BrandsSuppliedEditable,
   TrustSignalsEditable,
   TestimonialsEditable,
@@ -79,13 +80,18 @@ export function resolveSiteMeta(raw: unknown, fallback: SiteMeta): SiteMeta {
 // ---------------------------------------------------------------------------
 // contact_info
 // ---------------------------------------------------------------------------
-export function isValidContactInfoEditable(v: unknown): v is ContactInfo {
+export function isValidContactInfoEditable(v: unknown): v is ContactInfoEditable {
   if (!isPlainObject(v)) return false;
+  // phone is optional (see types.ts) — a legacy row simply won't have the
+  // key yet, and that's valid; if present it just has to be a string (an
+  // admin clearing it back to "" is treated as "missing" by resolve below,
+  // not as an invalid shape).
   return (
     isNonEmptyString(v.email) &&
     isNonEmptyString(v.whatsappBusinessLabel) &&
     isNonEmptyString(v.whatsappBusinessNote) &&
-    isNonEmptyString(v.location)
+    isNonEmptyString(v.location) &&
+    (v.phone === undefined || isString(v.phone))
   );
 }
 
@@ -96,6 +102,7 @@ export function resolveContactInfo(raw: unknown, fallback: ContactInfo): Contact
     whatsappBusinessLabel: raw.whatsappBusinessLabel,
     whatsappBusinessNote: raw.whatsappBusinessNote,
     location: raw.location,
+    phone: isNonEmptyString(raw.phone) ? raw.phone : fallback.phone,
   };
 }
 

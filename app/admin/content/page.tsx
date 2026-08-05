@@ -224,12 +224,19 @@ export default async function SiteContentPage() {
               action={saveContactInfo}
               initialValues={{
                 email: contactInfoValue.email ?? "",
+                phone: contactInfoValue.phone ?? "",
                 whatsappBusinessLabel: contactInfoValue.whatsappBusinessLabel ?? "",
                 whatsappBusinessNote: contactInfoValue.whatsappBusinessNote ?? "",
                 location: contactInfoValue.location ?? "",
               }}
               fields={[
                 { name: "email", label: "Email", kind: "text" },
+                {
+                  name: "phone",
+                  label: "Phone (for calls)",
+                  kind: "text",
+                  help: "Rendered as a clickable tel: link on the Contact page. Leave blank to fall back to the default number.",
+                },
                 { name: "location", label: "Location", kind: "text" },
                 { name: "whatsappBusinessLabel", label: "WhatsApp label", kind: "text" },
                 {

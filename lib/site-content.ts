@@ -38,6 +38,7 @@ export const siteMeta = {
 // TODO(founder input needed): WhatsApp Business number for a working wa.me link.
 export const contactInfo = {
   email: "quotes@veridanlimited.com",
+  phone: "1 876 848 9983",
   whatsappBusinessLabel: "WhatsApp Business",
   // TODO(founder input needed): provide the WhatsApp Business number so this
   // can become a working https://wa.me/<number> link.
@@ -104,7 +105,7 @@ export const trustSignals = [
   },
   {
     title: "Multi-origin supply chain",
-    body: "A proven logistics footprint spanning the US, UK, and Canada — built on dual Jamaican-Canadian citizenship and direct manufacturer/distributor relationships.",
+    body: "A proven logistics footprint spanning the US, UK, and Canada — built on direct manufacturer and distributor relationships.",
   },
   {
     title: "Manufacturer warranties",
@@ -216,8 +217,8 @@ export const aboutStory = {
   heading: "Built to close Jamaica's commercial hardware gap",
   body: [
     "Architects across Jamaica routinely specify internationally certified hardware — Assa Abloy, Allegion, Schlage, Consort, LCN, Von Duprin — on commercial projects. Until Veridan, there was no dedicated local supplier built to source, land, and deliver that exact specification.",
-    "Veridan was founded by Ken Yatta and Kaylia to close that gap: a Kingston-based specialist with a proven multi-origin supply chain across the United States, United Kingdom, and Canada, built on the founders' dual Jamaican-Canadian citizenship.",
-    "The company has already delivered its first order end-to-end — from specification review through managed import to site delivery with full warranty documentation — proving the model works before scaling it.",
+    "Veridan was founded by Kenyatta and Kay-Dean to close that gap: a Kingston-based specialist with a proven multi-origin supply chain spanning the United States, United Kingdom, and Canada.",
+    "The company has already executed end-to-end orders — from specification review and technical validation through managed import, site delivery, and full warranty documentation — establishing a proven, repeatable model ready for national scale.",
   ],
 } as const;
 

@@ -44,6 +44,12 @@ export async function SiteFooter() {
           >
             {contactInfo.email}
           </a>
+          <a
+            href={`tel:+${contactInfo.phone.replace(/[^0-9]/g, "")}`}
+            className="text-sm text-veridan-paper/80 transition-colors hover:text-veridan-accent-soft"
+          >
+            {contactInfo.phone}
+          </a>
           <p className="text-sm text-veridan-paper/80">
             {contactInfo.whatsappBusinessLabel}
           </p>

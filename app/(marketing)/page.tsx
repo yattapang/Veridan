@@ -78,7 +78,7 @@ export default async function HomePage() {
         <Container className="grid gap-12 lg:grid-cols-2 lg:items-start">
           <SectionHeading
             kicker="The Gap We Close"
-            title="Architects specify world-class hardware. Until now, nobody in Jamaica was built to deliver it."
+            title="Architects design for global standards. The local ecosystem just wasn't engineered to meet them — until now."
           />
           <div className="space-y-5 text-base leading-relaxed text-veridan-warm-gray">
             <p>

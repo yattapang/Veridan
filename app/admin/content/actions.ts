@@ -158,9 +158,12 @@ export async function saveContactInfo(
     whatsappBusinessLabel: str(formData.get("whatsappBusinessLabel")),
     whatsappBusinessNote: str(formData.get("whatsappBusinessNote")),
     location: str(formData.get("location")),
+    // Optional — an admin may leave this blank; resolveContactInfo falls
+    // back to the lib/site-content.ts constant's phone when it's empty.
+    phone: str(formData.get("phone")),
   };
   if (!isValidContactInfoEditable(value)) {
-    return { ok: false, error: "All fields (email, WhatsApp label, WhatsApp note, location) are required." };
+    return { ok: false, error: "Email, WhatsApp label, WhatsApp note, and location are required." };
   }
   return saveSection("contact_info", value, reasonFromFormData(formData));
 }

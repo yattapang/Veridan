@@ -190,8 +190,36 @@ describe("fallback resolution — the guarantee marketing pages depend on: missi
       whatsappBusinessLabel: "WhatsApp Business",
       whatsappBusinessNote: "+1 876 555 0100",
       location: "Kingston, Jamaica",
+      phone: "1 876 555 0199",
     };
     expect(resolveContactInfo(dbValue, contactInfo)).toEqual(dbValue);
+  });
+
+  it("contact_info: phone is optional — a legacy row missing the key still resolves, falling back to the constant's phone only", () => {
+    const legacyDbValue = {
+      email: "quotes@veridanlimited.com",
+      whatsappBusinessLabel: "WhatsApp Business",
+      whatsappBusinessNote: "+1 876 555 0100",
+      location: "Kingston, Jamaica",
+      // no `phone` key at all
+    };
+    expect(isValidContactInfoEditable(legacyDbValue)).toBe(true);
+    expect(resolveContactInfo(legacyDbValue, contactInfo)).toEqual({
+      ...legacyDbValue,
+      phone: contactInfo.phone,
+    });
+  });
+
+  it("contact_info: phone cleared to blank is treated as missing, not as an invalid shape", () => {
+    const dbValue = {
+      email: "quotes@veridanlimited.com",
+      whatsappBusinessLabel: "WhatsApp Business",
+      whatsappBusinessNote: "+1 876 555 0100",
+      location: "Kingston, Jamaica",
+      phone: "   ",
+    };
+    expect(isValidContactInfoEditable(dbValue)).toBe(true);
+    expect(resolveContactInfo(dbValue, contactInfo).phone).toBe(contactInfo.phone);
   });
 
   it("brands_supplied: missing falls back to the hardcoded list; a validly-empty DB array is honored, not treated as missing", () => {
