@@ -17,6 +17,8 @@ import {
   productCategories as productCategoriesFallback,
   founders as foundersFallback,
   aboutStory as aboutStoryFallback,
+  installGallery as installGalleryFallback,
+  consultationBooking as consultationBookingFallback,
 } from "@/lib/site-content";
 import {
   resolveSiteMeta,
@@ -28,6 +30,8 @@ import {
   resolveProductCategories,
   resolveFounders,
   resolveAboutStory,
+  resolveInstallGallery,
+  resolveConsultationBooking,
 } from "./validation";
 import type {
   SiteMeta,
@@ -39,6 +43,8 @@ import type {
   ProductCategoriesEditable,
   FoundersEditable,
   AboutStoryEditable,
+  InstallGalleryEditable,
+  ConsultationBookingEditable,
   SiteContentKey,
 } from "./types";
 
@@ -101,10 +107,19 @@ async function fetchSectionValue(
   }
 }
 
-function makeSectionLoader<T>(
+/**
+ * `F` defaults to `T` (every original Phase 3A section resolves and falls
+ * back with the same shape). `brands_supplied` (Marketing frameworks build,
+ * Framework A) is the one exception: `resolveBrandsSupplied`'s fallback
+ * parameter is `readonly string[]` (lib/site-content.ts's `brandsSupplied`
+ * stays plain names — see that file's comment) while its return/T is the
+ * normalized `BrandEntry[]` — hence the separate `F` type param, explicitly
+ * supplied at that one call site below.
+ */
+function makeSectionLoader<T, F = T>(
   key: SiteContentKey,
-  resolve: (raw: unknown, fallback: T) => T,
-  fallback: T
+  resolve: (raw: unknown, fallback: F) => T,
+  fallback: F
 ): () => Promise<T> {
   return async function load(): Promise<T> {
     let supabase: SupabaseClient;
@@ -113,7 +128,13 @@ function makeSectionLoader<T>(
     } catch {
       // Supabase env vars not configured — same fallback discipline as
       // every other loader in this repo (e.g. app/admin/parameters/page.tsx).
-      return fallback;
+      // Routed through `resolve` (not returned bare) so the result is
+      // always shape T, not F — for every original section F=T and
+      // resolve(undefined, fallback) returns fallback verbatim by
+      // construction, so this is a no-op there; for brands_supplied
+      // (F = readonly string[], T = BrandEntry[]) it's the one branch that
+      // actually needs the normalization.
+      return resolve(undefined, fallback);
     }
 
     const cached = unstable_cache(
@@ -139,10 +160,10 @@ export const getContactInfo = makeSectionLoader<ContactInfo>(
   contactInfoFallback
 );
 
-export const getBrandsSupplied = makeSectionLoader<BrandsSuppliedEditable>(
+export const getBrandsSupplied = makeSectionLoader<BrandsSuppliedEditable, readonly string[]>(
   "brands_supplied",
   resolveBrandsSupplied,
-  [...brandsSuppliedFallback]
+  brandsSuppliedFallback
 );
 
 export const getTrustSignals = makeSectionLoader<TrustSignalsEditable>(
@@ -180,3 +201,47 @@ export const getAboutStory = makeSectionLoader<AboutStoryEditable>(
   resolveAboutStory,
   { heading: aboutStoryFallback.heading, body: [...aboutStoryFallback.body] }
 );
+
+// Marketing frameworks build (2026-08-05) — Framework B / Framework C.
+export const getInstallGallery = makeSectionLoader<InstallGalleryEditable>(
+  "install_gallery",
+  resolveInstallGallery,
+  [...installGalleryFallback]
+);
+
+export const getConsultationBooking = makeSectionLoader<ConsultationBookingEditable>(
+  "consultation_booking",
+  resolveConsultationBooking,
+  { url: consultationBookingFallback.url }
+);
+
+/**
+ * Public URL for a brand logo in the public `brand-logos` bucket, or null
+ * if there isn't one — same shape as lib/articles/publicLoader.ts's
+ * publicHeroImageUrl (cookie-free client, no signing needed since the
+ * bucket is public).
+ */
+export function publicBrandLogoUrl(logoPath: string | null): string | null {
+  if (!logoPath) return null;
+  let supabase: SupabaseClient;
+  try {
+    supabase = createPublicContentClient();
+  } catch {
+    return null;
+  }
+  const { data } = supabase.storage.from("brand-logos").getPublicUrl(logoPath);
+  return data.publicUrl;
+}
+
+/** Public URL for an install-gallery photo in the public `install-photos` bucket, or null if there isn't one. */
+export function publicInstallPhotoUrl(imagePath: string | null): string | null {
+  if (!imagePath) return null;
+  let supabase: SupabaseClient;
+  try {
+    supabase = createPublicContentClient();
+  } catch {
+    return null;
+  }
+  const { data } = supabase.storage.from("install-photos").getPublicUrl(imagePath);
+  return data.publicUrl;
+}

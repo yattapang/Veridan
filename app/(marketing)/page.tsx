@@ -16,6 +16,10 @@ import {
   getTrustSignals,
   getBrandsSupplied,
   getTestimonials,
+  getInstallGallery,
+  getConsultationBooking,
+  publicBrandLogoUrl,
+  publicInstallPhotoUrl,
 } from "@/lib/site-content-db/loader";
 
 // Async so an admin-edited description shows up in <meta name="description">
@@ -30,13 +34,24 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function HomePage() {
-  const [siteMeta, serviceLines, trustSignals, brandsSupplied, testimonials] = await Promise.all([
+  const [
+    siteMeta,
+    serviceLines,
+    trustSignals,
+    brandsSupplied,
+    testimonials,
+    installGallery,
+    consultationBooking,
+  ] = await Promise.all([
     getSiteMeta(),
     getServiceLines(),
     getTrustSignals(),
     getBrandsSupplied(),
     getTestimonials(),
+    getInstallGallery(),
+    getConsultationBooking(),
   ]);
+  const bookingUrl = consultationBooking.url || null;
 
   return (
     <>
@@ -176,14 +191,32 @@ export default async function HomePage() {
             Brands We Supply
           </p>
           <div className="flex flex-wrap items-center justify-center gap-x-12 gap-y-6">
-            {brandsSupplied.map((brand) => (
-              <span
-                key={brand}
-                className="text-lg font-medium tracking-tight text-veridan-ink/70"
-              >
-                {brand}
-              </span>
-            ))}
+            {brandsSupplied.map((brand) => {
+              const logoUrl = publicBrandLogoUrl(brand.logoPath);
+              // No logo uploaded (the default for every brand until a
+              // founder adds one from /admin/content) — render the text
+              // name EXACTLY as before Framework A shipped, so the strip
+              // looks byte-identical with zero logos uploaded.
+              if (!logoUrl) {
+                return (
+                  <span
+                    key={brand.name}
+                    className="text-lg font-medium tracking-tight text-veridan-ink/70"
+                  >
+                    {brand.name}
+                  </span>
+                );
+              }
+              return (
+                // eslint-disable-next-line @next/next/no-img-element -- public Storage-hosted image, same reviewed choice as the article hero image (app/(marketing)/articles/[slug]/page.tsx) — next/image's remote-pattern config isn't wired up for a dynamic Supabase bucket path.
+                <img
+                  key={brand.name}
+                  src={logoUrl}
+                  alt={brand.name}
+                  className="h-10 w-auto max-w-[10rem] object-contain grayscale transition-[filter] duration-200 hover:grayscale-0"
+                />
+              );
+            })}
           </div>
         </Container>
       </section>
@@ -213,6 +246,39 @@ export default async function HomePage() {
         </section>
       )}
 
+      {/* "Our Work" install-photo gallery (Framework B) — rendered only
+          when at least one photo exists (stays clean until a founder adds
+          one from /admin/content), same discipline as Testimonials above.
+          Placed after Trust signals, before the closing CTA. */}
+      {installGallery.length > 0 && (
+        <section className="py-20 sm:py-28">
+          <Container>
+            <SectionHeading kicker="Our Work" title="Recent completed installs." align="center" />
+            <div className="mt-14 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+              {installGallery.map((photo, i) => {
+                const photoUrl = publicInstallPhotoUrl(photo.image_path);
+                if (!photoUrl) return null;
+                return (
+                  <figure key={`${photo.image_path}-${i}`} className="overflow-hidden rounded-md border border-veridan-warm-gray-light bg-veridan-warm-gray-pale">
+                    {/* eslint-disable-next-line @next/next/no-img-element -- public Storage-hosted image, same reviewed choice as the article hero image (app/(marketing)/articles/[slug]/page.tsx). */}
+                    <img
+                      src={photoUrl}
+                      alt={photo.caption ?? ""}
+                      className="h-64 w-full object-cover"
+                    />
+                    {photo.caption && (
+                      <figcaption className="p-4 text-sm text-veridan-warm-gray">
+                        {photo.caption}
+                      </figcaption>
+                    )}
+                  </figure>
+                );
+              })}
+            </div>
+          </Container>
+        </section>
+      )}
+
       {/* Closing CTA */}
       <section className="bg-veridan-ink py-20 text-veridan-paper sm:py-24">
         <Container className="flex flex-col items-center gap-6 text-center">
@@ -223,11 +289,23 @@ export default async function HomePage() {
             Tell us about your project and get a fully itemised, landed-cost
             quote — no hidden fees, no post-delivery surprises.
           </p>
-          <ButtonLink href={primaryCta.href} variant="primary">
-            {primaryCta.label}
-          </ButtonLink>
+          <div className="flex flex-col gap-4 sm:flex-row">
+            <ButtonLink href={primaryCta.href} variant="primary">
+              {primaryCta.label}
+            </ButtonLink>
+            {/* Framework C — renders only when a founder has set a booking
+                URL from /admin/content; nothing (no placeholder/broken
+                button) otherwise. */}
+            {bookingUrl && (
+              <ButtonLink href={bookingUrl} variant="ghost" target="_blank" rel="noopener noreferrer">
+                Book a Consultation
+              </ButtonLink>
+            )}
+          </div>
         </Container>
       </section>
     </>
   );
 }
+
+

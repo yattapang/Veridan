@@ -14,11 +14,25 @@ import {
   isValidProductCategoriesEditable,
   isValidFoundersEditable,
   isValidAboutStoryEditable,
+  isValidInstallGalleryEditable,
+  isValidConsultationBookingEditable,
 } from "@/lib/site-content-db/validation";
+import { validateMarketingImage } from "@/lib/marketing-uploads/imageValidation";
+import {
+  uploadBrandLogo,
+  brandLogoPublicUrl,
+  uploadInstallPhoto,
+  installPhotoPublicUrl,
+} from "@/lib/storage";
 
 export type SaveSectionResult =
   | { ok: true; error?: undefined }
   | { ok: false; error: string };
+
+/** Result of an immediate image-upload action (brand logo / install photo) — separate from SaveSectionResult since it carries the uploaded path + public URL back to the client for local list state, not a site_content save. */
+export type UploadImageResult =
+  | { ok: true; error?: undefined; path: string; url: string }
+  | { ok: false; error: string; path?: undefined; url?: undefined };
 
 function str(v: FormDataEntryValue | null): string {
   return typeof v === "string" ? v.trim() : "";
@@ -192,21 +206,79 @@ export async function saveAboutStory(
 // List sections
 // ---------------------------------------------------------------------------
 
+/**
+ * Marketing frameworks build (2026-08-05), Framework A: `items` here are
+ * `{ name, logo_path }` (BrandsEditor.tsx — a bespoke editor, not the
+ * generic ListEditor, since each row also manages an optional logo image).
+ * Logos themselves are uploaded separately and immediately via
+ * uploadBrandLogoAction (mirrors HeroImageUploader's "upload now, save the
+ * rest of the form later" split) — this action only ever receives an
+ * already-uploaded Storage path, never a File. Always writes the new
+ * `{name, logo_path}` object shape going forward; a legacy plain-string[]
+ * row keeps validating (and rendering) until the next time a founder saves
+ * this section, at which point it's normalized to the richer shape too —
+ * see lib/brands/normalize.ts.
+ */
 export async function saveBrandsSupplied(
   _prevState: SaveSectionResult,
   formData: FormData
 ): Promise<SaveSectionResult> {
   const parsed = parseItemsField(formData);
   if (!parsed.ok) return parsed;
-  const value = parsed.items.map((item) =>
-    typeof item === "object" && item !== null && "value" in item
-      ? String((item as Record<string, unknown>).value ?? "").trim()
-      : ""
-  );
+  const value = parsed.items.map((item) => {
+    const rec = typeof item === "object" && item !== null ? (item as Record<string, unknown>) : {};
+    const name = typeof rec.name === "string" ? rec.name.trim() : "";
+    const logoPath =
+      typeof rec.logo_path === "string" && rec.logo_path.trim() !== "" ? rec.logo_path : null;
+    return { name, logo_path: logoPath };
+  });
   if (!isValidBrandsSuppliedEditable(value)) {
-    return { ok: false, error: "Every brand name must be non-empty." };
+    return { ok: false, error: "Every brand needs a non-empty name." };
   }
   return saveSection("brands_supplied", value, reasonFromFormData(formData));
+}
+
+/**
+ * Immediate logo upload for one brand row (Framework A) — called from
+ * BrandLogoUpload.tsx as soon as a founder picks a file, before the overall
+ * "Save" button is pressed, mirroring HeroImageUploader's
+ * saveHeroImage.bind(null, articleId) pattern. `brandKey` is a client-
+ * generated per-row id (brands aren't DB rows with a stable id), used only
+ * as the Storage path prefix so two rows' uploads never collide.
+ */
+export async function uploadBrandLogoAction(
+  brandKey: string,
+  _prevState: UploadImageResult,
+  formData: FormData
+): Promise<UploadImageResult> {
+  let supabase;
+  try {
+    supabase = await createClient();
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Supabase is not configured for this environment.",
+    };
+  }
+
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "You must be signed in to upload a brand logo." };
+
+  const file = formData.get("logo");
+  if (!(file instanceof File) || file.size === 0) {
+    return { ok: false, error: "Choose an image file." };
+  }
+  const validation = validateMarketingImage(file);
+  if (!validation.ok) return { ok: false, error: validation.error };
+
+  const { path, error } = await uploadBrandLogo(supabase, brandKey, file);
+  if (error || !path) {
+    return { ok: false, error: `Could not upload the logo: ${error ?? "unknown error"}` };
+  }
+  const url = brandLogoPublicUrl(supabase, path);
+  if (!url) return { ok: false, error: "Logo uploaded but its public URL could not be resolved." };
+
+  return { ok: true, path, url };
 }
 
 export async function saveTrustSignals(
@@ -270,4 +342,92 @@ export async function saveFounders(
     return { ok: false, error: "Every founder needs a name, role, and bio." };
   }
   return saveSection("founders", parsed.items, reasonFromFormData(formData));
+}
+
+// ---------------------------------------------------------------------------
+// Marketing frameworks (2026-08-05) — Framework B ("Our Work" install-photo
+// gallery) and Framework C ("Book a Consultation" link).
+// ---------------------------------------------------------------------------
+
+/**
+ * `items` here are `{ image_path, caption? }` (InstallGalleryEditor.tsx — a
+ * bespoke editor, not the generic ListEditor, since each row manages a
+ * required photo upload). Photos are uploaded separately and immediately
+ * via uploadInstallPhotoAction, same "upload now, save the list later"
+ * split as saveBrandsSupplied/uploadBrandLogoAction above.
+ */
+export async function saveInstallGallery(
+  _prevState: SaveSectionResult,
+  formData: FormData
+): Promise<SaveSectionResult> {
+  const parsed = parseItemsField(formData);
+  if (!parsed.ok) return parsed;
+  const value = parsed.items.map((item) => {
+    const rec = typeof item === "object" && item !== null ? (item as Record<string, unknown>) : {};
+    const image_path = typeof rec.image_path === "string" ? rec.image_path.trim() : "";
+    const caption = typeof rec.caption === "string" ? rec.caption.trim() : "";
+    return caption ? { image_path, caption } : { image_path };
+  });
+  if (!isValidInstallGalleryEditable(value)) {
+    return { ok: false, error: "Every photo needs an uploaded image." };
+  }
+  return saveSection("install_gallery", value, reasonFromFormData(formData));
+}
+
+/**
+ * Immediate photo upload for one gallery row (Framework B) — called from
+ * InstallPhotoUpload.tsx as soon as a founder picks a file, mirroring
+ * uploadBrandLogoAction above. No parent-entity id to key off (gallery
+ * photos aren't rows in a table), so the Storage path prefix is a fixed
+ * "install-photos" (see lib/storage.ts's uploadInstallPhoto).
+ */
+export async function uploadInstallPhotoAction(
+  _prevState: UploadImageResult,
+  formData: FormData
+): Promise<UploadImageResult> {
+  let supabase;
+  try {
+    supabase = await createClient();
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Supabase is not configured for this environment.",
+    };
+  }
+
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "You must be signed in to upload a photo." };
+
+  const file = formData.get("photo");
+  if (!(file instanceof File) || file.size === 0) {
+    return { ok: false, error: "Choose an image file." };
+  }
+  const validation = validateMarketingImage(file);
+  if (!validation.ok) return { ok: false, error: validation.error };
+
+  const { path, error } = await uploadInstallPhoto(supabase, file);
+  if (error || !path) {
+    return { ok: false, error: `Could not upload the photo: ${error ?? "unknown error"}` };
+  }
+  const url = installPhotoPublicUrl(supabase, path);
+  if (!url) return { ok: false, error: "Photo uploaded but its public URL could not be resolved." };
+
+  return { ok: true, path, url };
+}
+
+/**
+ * A single optional field (url) — plain ScalarForm, same as site_meta /
+ * contact_info / about_story. An empty string is valid (no booking button
+ * renders); a non-empty value must be a well-formed http(s) URL
+ * (isValidConsultationBookingEditable — lib/site-content-db/validation.ts).
+ */
+export async function saveConsultationBooking(
+  _prevState: SaveSectionResult,
+  formData: FormData
+): Promise<SaveSectionResult> {
+  const value = { url: str(formData.get("url")) };
+  if (!isValidConsultationBookingEditable(value)) {
+    return { ok: false, error: "Enter a valid http:// or https:// URL, or leave this blank." };
+  }
+  return saveSection("consultation_booking", value, reasonFromFormData(formData));
 }

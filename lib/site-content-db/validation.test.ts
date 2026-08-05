@@ -23,6 +23,8 @@ import {
   isValidProductCategoriesEditable,
   isValidFoundersEditable,
   isValidAboutStoryEditable,
+  isValidInstallGalleryEditable,
+  isValidConsultationBookingEditable,
   resolveSiteMeta,
   resolveContactInfo,
   resolveBrandsSupplied,
@@ -32,6 +34,8 @@ import {
   resolveProductCategories,
   resolveFounders,
   resolveAboutStory,
+  resolveInstallGallery,
+  resolveConsultationBooking,
 } from "./validation";
 
 describe("shape validation — the current lib/site-content.ts constants are themselves valid (sanity check the validators against real data)", () => {
@@ -222,10 +226,20 @@ describe("fallback resolution — the guarantee marketing pages depend on: missi
     expect(resolveContactInfo(dbValue, contactInfo).phone).toBe(contactInfo.phone);
   });
 
-  it("brands_supplied: missing falls back to the hardcoded list; a validly-empty DB array is honored, not treated as missing", () => {
-    expect(resolveBrandsSupplied(undefined, brandsSupplied)).toEqual([...brandsSupplied]);
+  it("brands_supplied: missing falls back to the hardcoded list (normalized to {name, logoPath: null}); a validly-empty DB array is honored, not treated as missing; the new {name, logo_path} shape normalizes too", () => {
+    expect(resolveBrandsSupplied(undefined, brandsSupplied)).toEqual(
+      brandsSupplied.map((name) => ({ name, logoPath: null }))
+    );
     expect(resolveBrandsSupplied([], brandsSupplied)).toEqual([]);
-    expect(resolveBrandsSupplied(["Only One Brand"], brandsSupplied)).toEqual(["Only One Brand"]);
+    expect(resolveBrandsSupplied(["Only One Brand"], brandsSupplied)).toEqual([
+      { name: "Only One Brand", logoPath: null },
+    ]);
+    expect(
+      resolveBrandsSupplied(
+        [{ name: "Only One Brand", logo_path: "only-one-brand/1-logo.png" }],
+        brandsSupplied
+      )
+    ).toEqual([{ name: "Only One Brand", logoPath: "only-one-brand/1-logo.png" }]);
   });
 
   it("trust_signals / testimonials / service_lines / product_categories / founders: same missing-vs-invalid-vs-valid pattern", () => {
@@ -254,5 +268,67 @@ describe("fallback resolution — the guarantee marketing pages depend on: missi
     const mutableAboutStory = { heading: aboutStory.heading, body: [...aboutStory.body] };
     expect(resolveAboutStory(undefined, mutableAboutStory)).toEqual(mutableAboutStory);
     expect(resolveAboutStory({ heading: "H" }, mutableAboutStory)).toEqual(mutableAboutStory);
+  });
+});
+
+describe("install_gallery (Marketing frameworks build, Framework B) — seeded-empty, founder-populated array of {image_path, caption?}", () => {
+  it("an empty array is valid (the seeded default)", () => {
+    expect(isValidInstallGalleryEditable([])).toBe(true);
+  });
+
+  it("a photo with a caption, and a photo without one (caption is optional)", () => {
+    expect(
+      isValidInstallGalleryEditable([
+        { image_path: "a/1-photo.jpg", caption: "Front door install, Kingston" },
+        { image_path: "a/2-photo.jpg" },
+      ])
+    ).toBe(true);
+  });
+
+  it("rejects a non-array, a missing/blank image_path, or a non-string caption", () => {
+    expect(isValidInstallGalleryEditable(undefined)).toBe(false);
+    expect(isValidInstallGalleryEditable("a/1-photo.jpg")).toBe(false);
+    expect(isValidInstallGalleryEditable([{ caption: "No photo" }])).toBe(false);
+    expect(isValidInstallGalleryEditable([{ image_path: "  " }])).toBe(false);
+    expect(isValidInstallGalleryEditable([{ image_path: "a/1-photo.jpg", caption: 5 }])).toBe(false);
+  });
+
+  it("resolveInstallGallery: missing/invalid falls back verbatim to the (empty) fallback; a valid DB value is honored", () => {
+    expect(resolveInstallGallery(undefined, [])).toEqual([]);
+    expect(resolveInstallGallery("nope", [])).toEqual([]);
+    const items = [{ image_path: "a/1-photo.jpg", caption: "A finished install" }];
+    expect(resolveInstallGallery(items, [])).toEqual(items);
+  });
+});
+
+describe("consultation_booking (Marketing frameworks build, Framework C) — optional {url}, empty allowed", () => {
+  it("an empty url is valid (the seeded default — no booking button renders)", () => {
+    expect(isValidConsultationBookingEditable({ url: "" })).toBe(true);
+    expect(isValidConsultationBookingEditable({ url: "   " })).toBe(true);
+  });
+
+  it("a well-formed http(s) URL is valid", () => {
+    expect(isValidConsultationBookingEditable({ url: "https://outlook.office.com/book/Veridan" })).toBe(
+      true
+    );
+    expect(isValidConsultationBookingEditable({ url: "http://example.com/book" })).toBe(true);
+  });
+
+  it("rejects a non-URL string, a non-http(s) scheme, and a malformed shape", () => {
+    expect(isValidConsultationBookingEditable({ url: "not a url" })).toBe(false);
+    expect(isValidConsultationBookingEditable({ url: "javascript:alert(1)" })).toBe(false);
+    expect(isValidConsultationBookingEditable({ url: "ftp://example.com/book" })).toBe(false);
+    expect(isValidConsultationBookingEditable(undefined)).toBe(false);
+    expect(isValidConsultationBookingEditable({ url: 5 })).toBe(false);
+    expect(isValidConsultationBookingEditable({})).toBe(false);
+  });
+
+  it("resolveConsultationBooking: missing/invalid falls back verbatim; a valid value is trimmed", () => {
+    const fallback = { url: "" };
+    expect(resolveConsultationBooking(undefined, fallback)).toEqual(fallback);
+    expect(resolveConsultationBooking({ url: "not a url" }, fallback)).toEqual(fallback);
+    expect(resolveConsultationBooking({ url: "  https://example.com/book  " }, fallback)).toEqual({
+      url: "https://example.com/book",
+    });
   });
 });

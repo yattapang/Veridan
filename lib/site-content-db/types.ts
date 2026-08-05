@@ -18,14 +18,16 @@
 import type {
   siteMeta,
   contactInfo,
-  brandsSupplied,
   trustSignals,
   testimonials,
   serviceLines,
   productCategories,
   founders,
   aboutStory,
+  installGallery,
+  consultationBooking,
 } from "@/lib/site-content";
+import type { BrandEntry } from "@/lib/brands/normalize";
 
 type Widen<T> = T extends string
   ? string
@@ -39,7 +41,13 @@ type Widen<T> = T extends string
           ? { -readonly [K in keyof T]: Widen<T[K]> }
           : T;
 
-/** The 9 sections migrated to `site_content` (Plan §1.4). Order matches the seed migration. */
+/**
+ * The site_content section keys. The first 9 are Phase 3A's original set
+ * (Plan §1.4, order matches its seed migration). `install_gallery` and
+ * `consultation_booking` were added by the 2026-08-05 marketing-frameworks
+ * build (supabase/migrations/20260805000001_marketing_frameworks.sql),
+ * seeded empty.
+ */
 export const SITE_CONTENT_KEYS = [
   "site_meta",
   "contact_info",
@@ -50,6 +58,8 @@ export const SITE_CONTENT_KEYS = [
   "product_categories",
   "founders",
   "about_story",
+  "install_gallery",
+  "consultation_booking",
 ] as const;
 
 export type SiteContentKey = (typeof SITE_CONTENT_KEYS)[number];
@@ -61,7 +71,16 @@ export type SiteContentKey = (typeof SITE_CONTENT_KEYS)[number];
 // ---------------------------------------------------------------------------
 export type SiteMeta = Widen<typeof siteMeta>;
 export type ContactInfo = Widen<typeof contactInfo>;
-export type BrandsSupplied = Widen<typeof brandsSupplied>;
+// NOT derived via Widen<typeof brandsSupplied> — the lib/site-content.ts
+// fallback constant deliberately stays a plain string[] (Marketing
+// frameworks build, "the fallback constant brandsSupplied stays as names
+// and must still validate"), but the shape every loader/component actually
+// works with is the normalized BrandEntry[] (see lib/brands/normalize.ts:
+// both the legacy string[] shape and the new
+// Array<{name; logo_path?}> shape normalize to this one). Re-exported here
+// so components import it from the usual lib/site-content-db/types module.
+export type { BrandEntry };
+export type BrandsSupplied = BrandEntry[];
 export type TrustSignal = Widen<typeof trustSignals>[number];
 export type TrustSignals = Widen<typeof trustSignals>;
 export type Testimonial = Widen<typeof testimonials>[number];
@@ -73,6 +92,9 @@ export type ProductCategories = Widen<typeof productCategories>;
 export type Founder = Widen<typeof founders>[number];
 export type Founders = Widen<typeof founders>;
 export type AboutStory = Widen<typeof aboutStory>;
+export type InstallGalleryItem = Widen<typeof installGallery>[number];
+export type InstallGallery = Widen<typeof installGallery>;
+export type ConsultationBooking = Widen<typeof consultationBooking>;
 
 // ---------------------------------------------------------------------------
 // "Editable" shapes — the subset of each full shape actually stored in and
@@ -103,6 +125,9 @@ export type ProductCategoriesEditable = ProductCategory[];
 export type FounderEditable = Founder;
 export type FoundersEditable = Founder[];
 export type AboutStoryEditable = AboutStory;
+export type InstallGalleryItemEditable = InstallGalleryItem;
+export type InstallGalleryEditable = InstallGalleryItem[];
+export type ConsultationBookingEditable = ConsultationBooking;
 
 /** The jsonb envelope shape stored in site_content.value (mirrors business_parameters.value). */
 export interface SiteContentValueEnvelope<T> {

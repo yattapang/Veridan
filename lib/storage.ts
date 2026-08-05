@@ -1,5 +1,6 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { buildMarketingImageStoragePath } from "@/lib/marketing-uploads/imageValidation";
 
 /**
  * Signed-URL helper for the private `enquiry-uploads` bucket (Task 13).
@@ -327,4 +328,76 @@ export async function removeCatalogueFiles(
     // best-effort cleanup only — an orphaned Storage object is a lesser
     // problem than failing the delete the founder actually asked for.
   }
+}
+
+// ============================================================================
+// Marketing frameworks (2026-08-05) — Framework A (brand-logos) and
+// Framework B (install-photos), both PUBLIC buckets. Same shape as
+// uploadArticleHeroImage / articleHeroImagePublicUrl above: no signing
+// needed (public bucket), `<prefix>/<timestamp>-<filename>` path via
+// lib/marketing-uploads/imageValidation.ts's buildMarketingImageStoragePath
+// (there's no stable parent-entity id to key off, unlike an article/
+// catalogue-document row, so the prefix is a caller-supplied slug instead).
+// Callers MUST validate the file with validateMarketingImage() before
+// calling either upload function — these helpers don't re-validate size/type
+// themselves (mirrors uploadArticleHeroImage, which also trusts its caller).
+// ============================================================================
+
+/**
+ * Uploads a brand logo to the PUBLIC `brand-logos` bucket (Framework A).
+ * `brandKey` is a caller-supplied slug (e.g. derived from the brand name) —
+ * brands aren't rows in a table with a stable id, so there's no `<id>/...`
+ * prefix the way there is for uploadArticleHeroImage.
+ */
+export async function uploadBrandLogo(
+  supabase: SupabaseClient,
+  brandKey: string,
+  file: File
+): Promise<{ path: string | null; error: string | null }> {
+  const path = buildMarketingImageStoragePath(brandKey, file.name);
+  const { error } = await supabase.storage.from("brand-logos").upload(path, file, {
+    contentType: file.type || undefined,
+    upsert: true,
+  });
+  if (error) return { path: null, error: error.message };
+  return { path, error: null };
+}
+
+/** Public URL for a brand logo, from a founder-authenticated session (no signing needed — the bucket is public). */
+export function brandLogoPublicUrl(
+  supabase: SupabaseClient,
+  path: string | null | undefined
+): string | null {
+  if (!path) return null;
+  const { data } = supabase.storage.from("brand-logos").getPublicUrl(path);
+  return data.publicUrl ?? null;
+}
+
+/**
+ * Uploads a completed-install photo to the PUBLIC `install-photos` bucket
+ * (Framework B — the "Our Work" gallery). Gallery photos aren't rows tied to
+ * a parent entity either, so the path prefix is simply "install-photos"
+ * (mirrors uploadBrandLogo's reasoning above).
+ */
+export async function uploadInstallPhoto(
+  supabase: SupabaseClient,
+  file: File
+): Promise<{ path: string | null; error: string | null }> {
+  const path = buildMarketingImageStoragePath("install-photos", file.name);
+  const { error } = await supabase.storage.from("install-photos").upload(path, file, {
+    contentType: file.type || undefined,
+    upsert: true,
+  });
+  if (error) return { path: null, error: error.message };
+  return { path, error: null };
+}
+
+/** Public URL for an install-gallery photo (no signing needed — the bucket is public). */
+export function installPhotoPublicUrl(
+  supabase: SupabaseClient,
+  path: string | null | undefined
+): string | null {
+  if (!path) return null;
+  const { data } = supabase.storage.from("install-photos").getPublicUrl(path);
+  return data.publicUrl ?? null;
 }

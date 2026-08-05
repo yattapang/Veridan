@@ -4,7 +4,7 @@ import { Container } from "@/components/Container";
 import { ButtonLink } from "@/components/Button";
 // quoteRequestRoutes stays hardcoded (Plan §1.4 exclusion) — static import.
 import { quoteRequestRoutes } from "@/lib/site-content";
-import { getContactInfo } from "@/lib/site-content-db/loader";
+import { getContactInfo, getConsultationBooking } from "@/lib/site-content-db/loader";
 
 export const metadata: Metadata = {
   title: "Contact",
@@ -14,7 +14,11 @@ export const metadata: Metadata = {
 };
 
 export default async function ContactPage() {
-  const contactInfo = await getContactInfo();
+  const [contactInfo, consultationBooking] = await Promise.all([
+    getContactInfo(),
+    getConsultationBooking(),
+  ]);
+  const bookingUrl = consultationBooking.url || null;
 
   return (
     <>
@@ -23,6 +27,19 @@ export default async function ContactPage() {
         title="Let's talk about your project."
         lead="The fastest way to get an accurate quote is through the form for your project type. Prefer to talk first? Reach us directly below."
       />
+
+      {/* Framework C — "Book a Consultation" link, rendered only when a
+          founder has set a booking URL from /admin/content; nothing
+          otherwise (no placeholder/broken button). */}
+      {bookingUrl && (
+        <section className="pt-16 sm:pt-20">
+          <Container className="flex justify-center">
+            <ButtonLink href={bookingUrl} variant="secondary" target="_blank" rel="noopener noreferrer">
+              Book a Consultation
+            </ButtonLink>
+          </Container>
+        </section>
+      )}
 
       <section className="py-20 sm:py-28">
         <Container className="grid gap-8 sm:grid-cols-2">

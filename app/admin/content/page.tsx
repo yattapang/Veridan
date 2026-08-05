@@ -1,10 +1,14 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { brandLogoPublicUrl, installPhotoPublicUrl } from "@/lib/storage";
+import { normalizeBrandsSupplied } from "@/lib/brands/normalize";
 import { InstructiveMessage } from "@/components/admin/InstructiveMessage";
 import type { SiteContentKey, SiteContentRow } from "@/lib/site-content-db/types";
 import { SITE_CONTENT_KEYS } from "@/lib/site-content-db/types";
 import { ScalarForm } from "./ScalarForm";
 import { ListEditor } from "./ListEditor";
+import { BrandsEditor, type BrandItem } from "./BrandsEditor";
+import { InstallGalleryEditor, type InstallGalleryItem } from "./InstallGalleryEditor";
 import {
   saveSiteMeta,
   saveContactInfo,
@@ -15,6 +19,8 @@ import {
   saveServiceLines,
   saveProductCategories,
   saveFounders,
+  saveInstallGallery,
+  saveConsultationBooking,
 } from "./actions";
 
 export const metadata = {
@@ -32,6 +38,8 @@ const LIVE_PAGE_HREF: Record<SiteContentKey, string> = {
   product_categories: "/products",
   founders: "/about",
   about_story: "/about",
+  install_gallery: "/",
+  consultation_booking: "/contact",
 };
 
 function SectionShell({
@@ -153,6 +161,8 @@ export default async function SiteContentPage() {
   const serviceLinesRow = byKey.get("service_lines");
   const productCategoriesRow = byKey.get("product_categories");
   const foundersRow = byKey.get("founders");
+  const installGalleryRow = byKey.get("install_gallery");
+  const consultationBookingRow = byKey.get("consultation_booking");
 
   const siteMetaValue = (siteMetaRow?.value.value ?? {}) as Record<string, string>;
   const contactInfoValue = (contactInfoRow?.value.value ?? {}) as Record<string, string>;
@@ -160,7 +170,17 @@ export default async function SiteContentPage() {
     heading: string;
     body: string[];
   };
-  const brandsSuppliedValue = (brandsSuppliedRow?.value.value ?? []) as string[];
+  // brands_supplied's raw stored value may be the legacy string[] shape or
+  // the new Array<{name; logo_path?}> shape (Framework A) — normalize once
+  // here, then resolve each entry's public logo URL (bucket is public, so
+  // this is a synchronous getPublicUrl call, no signing/network round trip).
+  const brandItems: BrandItem[] = (normalizeBrandsSupplied(brandsSuppliedRow?.value.value) ?? []).map(
+    (b) => ({
+      name: b.name,
+      logoPath: b.logoPath,
+      logoUrl: brandLogoPublicUrl(supabase, b.logoPath),
+    })
+  );
   const trustSignalsValue = (trustSignalsRow?.value.value ?? []) as Record<string, unknown>[];
   const testimonialsValue = (testimonialsRow?.value.value ?? []) as Record<string, unknown>[];
   const serviceLinesValue = (serviceLinesRow?.value.value ?? []) as Record<string, unknown>[];
@@ -169,6 +189,18 @@ export default async function SiteContentPage() {
     unknown
   >[];
   const foundersValue = (foundersRow?.value.value ?? []) as Record<string, unknown>[];
+  const installGalleryRawValue = (installGalleryRow?.value.value ?? []) as Array<{
+    image_path?: string;
+    caption?: string;
+  }>;
+  const installGalleryItems: InstallGalleryItem[] = installGalleryRawValue.map((p) => ({
+    imagePath: p.image_path ?? "",
+    caption: p.caption ?? "",
+    imageUrl: installPhotoPublicUrl(supabase, p.image_path ?? null),
+  }));
+  const consultationBookingValue = (consultationBookingRow?.value.value ?? { url: "" }) as {
+    url?: string;
+  };
 
   return (
     <div className="max-w-3xl">
@@ -256,13 +288,7 @@ export default async function SiteContentPage() {
             description={brandsSuppliedRow.description}
             liveHref={LIVE_PAGE_HREF.brands_supplied}
           >
-            <ListEditor
-              action={saveBrandsSupplied}
-              itemLabel="brand"
-              emptyItem={{ value: "" }}
-              initialItems={brandsSuppliedValue.map((b) => ({ value: b }))}
-              fields={[{ name: "value", label: "Brand name", kind: "text" }]}
-            />
+            <BrandsEditor action={saveBrandsSupplied} initialItems={brandItems} />
           </SectionShell>
         )}
 
@@ -393,6 +419,37 @@ export default async function SiteContentPage() {
                   label: "Body",
                   kind: "paragraphs",
                   help: "Separate paragraphs with a blank line.",
+                },
+              ]}
+            />
+          </SectionShell>
+        )}
+
+        {installGalleryRow && (
+          <SectionShell
+            label={installGalleryRow.section_label}
+            description={installGalleryRow.description}
+            liveHref={LIVE_PAGE_HREF.install_gallery}
+          >
+            <InstallGalleryEditor action={saveInstallGallery} initialItems={installGalleryItems} />
+          </SectionShell>
+        )}
+
+        {consultationBookingRow && (
+          <SectionShell
+            label={consultationBookingRow.section_label}
+            description={consultationBookingRow.description}
+            liveHref={LIVE_PAGE_HREF.consultation_booking}
+          >
+            <ScalarForm
+              action={saveConsultationBooking}
+              initialValues={{ url: consultationBookingValue.url ?? "" }}
+              fields={[
+                {
+                  name: "url",
+                  label: "Booking URL",
+                  kind: "text",
+                  help: "e.g. a Microsoft Bookings link. Leave blank to hide the \"Book a Consultation\" button on the Contact page and home page.",
                 },
               ]}
             />

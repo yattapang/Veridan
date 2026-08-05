@@ -31,7 +31,12 @@ import type {
   ProductCategoriesEditable,
   FoundersEditable,
   AboutStoryEditable,
+  InstallGalleryEditable,
+  ConsultationBookingEditable,
 } from "./types";
+// Relative import (not the "@/..." alias) — same vitest runtime-import
+// constraint noted in the file header above and in lib/item-groups.ts.
+import { normalizeBrandsSupplied } from "../brands/normalize";
 
 function isNonEmptyString(v: unknown): v is string {
   return typeof v === "string" && v.trim() !== "";
@@ -107,20 +112,38 @@ export function resolveContactInfo(raw: unknown, fallback: ContactInfo): Contact
 }
 
 // ---------------------------------------------------------------------------
-// brands_supplied — array of plain strings. Empty array is valid (UAT §6.1
-// item 4: removing every brand must gracefully empty the brand strip, not
-// fall back to the hardcoded list).
+// brands_supplied — Marketing frameworks build (2026-08-05), Framework A:
+// now accepts EITHER the original plain-string[] shape (UAT §6.1 item 4:
+// removing every brand must gracefully empty the brand strip, not fall back
+// to the hardcoded list — still true, an empty array is valid) OR the new
+// Array<{ name; logo_path? }> shape with an optional per-brand logo.
+// normalizeBrandsSupplied (lib/brands/normalize.ts) is the single place
+// that understands both shapes; both isValid and resolve delegate to it so
+// there is exactly one normalization code path to review, matching this
+// file's usual "one fallback path, not three" discipline.
 // ---------------------------------------------------------------------------
 export function isValidBrandsSuppliedEditable(v: unknown): v is BrandsSuppliedEditable {
-  return Array.isArray(v) && v.every((item) => isNonEmptyString(item));
+  return normalizeBrandsSupplied(v) !== null;
 }
 
+/**
+ * Always returns the normalized `BrandEntry[]` shape ({ name, logoPath }),
+ * regardless of whether `raw` used the legacy string[] shape or the new
+ * object shape — this is the shape every marketing component and the admin
+ * editor actually consumes. `fallback` is always lib/site-content.ts's
+ * `brandsSupplied` (a plain string[] of names, by design — see that file's
+ * "Marketing frameworks" comment), normalized the same way.
+ */
 export function resolveBrandsSupplied(
   raw: unknown,
   fallback: readonly string[]
 ): BrandsSuppliedEditable {
-  if (!isValidBrandsSuppliedEditable(raw)) return [...fallback];
-  return raw;
+  const normalizedRaw = normalizeBrandsSupplied(raw);
+  if (normalizedRaw !== null) return normalizedRaw;
+  // fallback is always valid by construction (a non-empty list of plain
+  // brand-name strings), so this never falls through to `[]` in practice —
+  // the `?? []` is a type-level safety net only.
+  return normalizeBrandsSupplied([...fallback]) ?? [];
 }
 
 // ---------------------------------------------------------------------------
@@ -255,4 +278,63 @@ export function resolveAboutStory(
 ): AboutStoryEditable {
   if (!isValidAboutStoryEditable(raw)) return fallback;
   return raw;
+}
+
+// ---------------------------------------------------------------------------
+// install_gallery — Marketing frameworks build (2026-08-05), Framework B:
+// array of {image_path, caption?}. Empty array is the seeded default (same
+// "founder-populates-it-later" discipline as testimonials) — the public "Our
+// Work" section on the home page renders only when this is non-empty.
+// ---------------------------------------------------------------------------
+export function isValidInstallGalleryEditable(v: unknown): v is InstallGalleryEditable {
+  if (!Array.isArray(v)) return false;
+  return v.every(
+    (item) =>
+      isPlainObject(item) &&
+      isNonEmptyString(item.image_path) &&
+      (item.caption === undefined || isString(item.caption))
+  );
+}
+
+export function resolveInstallGallery(
+  raw: unknown,
+  fallback: InstallGalleryEditable
+): InstallGalleryEditable {
+  if (!isValidInstallGalleryEditable(raw)) return fallback;
+  return raw;
+}
+
+// ---------------------------------------------------------------------------
+// consultation_booking — Marketing frameworks build (2026-08-05),
+// Framework C: {url}. Empty string is valid and is the seeded default — no
+// "Book a Consultation" button renders anywhere until a founder pastes a
+// real URL. A non-empty value must be a well-formed http(s) URL (a
+// Microsoft Bookings link, per the brief) — this is the one section in this
+// file whose "valid" set includes a format check beyond non-empty-string,
+// since an admin-typed URL that isn't a URL at all would otherwise ship a
+// broken external link on two public pages (Contact, home page CTA).
+// ---------------------------------------------------------------------------
+function isHttpUrl(v: string): boolean {
+  try {
+    const parsed = new URL(v);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+export function isValidConsultationBookingEditable(
+  v: unknown
+): v is ConsultationBookingEditable {
+  if (!isPlainObject(v) || !isString(v.url)) return false;
+  const trimmed = v.url.trim();
+  return trimmed === "" || isHttpUrl(trimmed);
+}
+
+export function resolveConsultationBooking(
+  raw: unknown,
+  fallback: ConsultationBookingEditable
+): ConsultationBookingEditable {
+  if (!isValidConsultationBookingEditable(raw)) return fallback;
+  return { url: raw.url.trim() };
 }

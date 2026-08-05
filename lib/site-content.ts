@@ -227,6 +227,26 @@ export const quoteRequestRoutes = {
   retrofit: "/quote-request/retrofit",
 } as const;
 
+// Marketing frameworks (2026-08-05) — "founder-populates-it-later" sections.
+// Both seeded EMPTY: shipping them must change the live site's appearance by
+// exactly zero until a founder adds content from /admin/content.
+
+// Framework B — "Our Work" install-photo gallery. Rendered on the home page
+// only when non-empty (same discipline as `testimonials` above). image_path
+// is a Storage path within the public `install-photos` bucket; caption is
+// optional.
+export const installGallery: Array<{ image_path: string; caption?: string }> = [
+  // Intentionally empty — no install photos exist yet. Add here (or via
+  // /admin/content) once the founders have photos to publish.
+];
+
+// Framework C — optional "Book a Consultation" link. When empty, no booking
+// button renders anywhere (Contact page, home page closing CTA). Founder
+// will paste a Microsoft Bookings URL here (via /admin/content) later.
+export const consultationBooking = {
+  url: "",
+} as const;
+
 // FALLBACK ONLY since 2026-07-19: the live source of truth for bank details
 // is the admin-editable "invoice_payment_instructions" business parameter
 // (Admin → Parameters — founder request: bank details change over time and
