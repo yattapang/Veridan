@@ -29,9 +29,10 @@ export default async function ProductsPage() {
         <Container>
           <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
             {productCategories.map((cat) => (
-              <div
+              <Link
                 key={cat.key}
-                className="flex flex-col justify-between border border-veridan-warm-gray-light p-7"
+                href={`/products/${cat.key}`}
+                className="group flex flex-col justify-between border border-veridan-warm-gray-light p-7 transition-colors duration-150 hover:border-veridan-ink"
               >
                 <div>
                   <h3 className="text-lg font-semibold text-veridan-ink">
@@ -41,12 +42,17 @@ export default async function ProductsPage() {
                     {cat.description}
                   </p>
                 </div>
-                {cat.brands.length > 0 && (
-                  <p className="mt-6 text-xs font-medium uppercase tracking-wide text-veridan-accent-text">
-                    {cat.brands.join(" · ")}
-                  </p>
-                )}
-              </div>
+                <div>
+                  {cat.brands.length > 0 && (
+                    <p className="mt-6 text-xs font-medium uppercase tracking-wide text-veridan-accent-text">
+                      {cat.brands.join(" · ")}
+                    </p>
+                  )}
+                  <span className="mt-4 inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-veridan-accent-text group-hover:text-veridan-ink">
+                    View category →
+                  </span>
+                </div>
+              </Link>
             ))}
           </div>
 
