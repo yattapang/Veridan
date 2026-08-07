@@ -560,14 +560,30 @@ describe("buildTransactionLedger — filtering", () => {
     expect(ledger.rows).toHaveLength(3);
   });
 
-  it("yields nothing for a type the basis cannot produce", () => {
+  // Regression for the re-review finding: BasisToggle preserves `?type=`
+  // verbatim across a basis switch (see app/admin/reports/BasisToggle.tsx),
+  // so a cash-only "Customer Payment" chip picked before switching to
+  // accrual survives in the URL. Filtering literally on it would render an
+  // all-J$0.00 ledger under a heading that claims to reconcile to the income
+  // statement — see app/admin/reports/transactions/page.tsx's empty state.
+  it("falls back to the UNFILTERED basis ledger when every requested type is invalid for this basis, instead of silently zeroing it", () => {
+    const scenario = inputs({ issuedInvoices: [invoice()], costs: [cost()], expenses: [expense()] });
+    const unfiltered = buildTransactionLedger(scenario, RANGE, "accrual");
+    const staleCashFilter = buildTransactionLedger(scenario, RANGE, "accrual", { types: ["customer_payment"] });
+    expect(staleCashFilter.rows).toEqual(unfiltered.rows);
+    expect(staleCashFilter.totalInJmd).toBe(unfiltered.totalInJmd);
+    expect(staleCashFilter.rows).not.toEqual([]);
+  });
+
+  it("drops only the basis-invalid types from a mixed request, keeping the still-valid ones", () => {
     const ledger = buildTransactionLedger(
-      inputs({ issuedInvoices: [invoice()], payments: [payment()] }),
+      inputs({ issuedInvoices: [invoice()], costs: [cost()], expenses: [expense()] }),
       RANGE,
       "accrual",
-      { types: ["customer_payment"] },
+      // customer_payment is cash-only and invalid here; cost_of_sales is valid.
+      { types: ["customer_payment", "cost_of_sales"] },
     );
-    expect(ledger.rows).toEqual([]);
+    expect(ledger.rows.map((r) => r.type)).toEqual(["cost_of_sales"]);
   });
 
   it("totals reflect the filter", () => {

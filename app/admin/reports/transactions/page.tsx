@@ -9,6 +9,7 @@ import { loadFinancialStatementData } from "@/lib/reports/load";
 import {
   buildTransactionLedger,
   parseTransactionTypes,
+  transactionTypesForBasis,
   TRANSACTION_DIRECTION,
   TRANSACTION_FX_BASIS_LABELS,
   TRANSACTION_TYPE_LABELS,
@@ -105,6 +106,11 @@ export default async function TransactionDetailPage({
   );
 
   const usedCurrentRate = ledger.rows.some((r) => r.fxBasis === "current_rate");
+  // `types` is the raw, un-intersected request off the URL — `buildTransactionLedger`
+  // already dropped anything this basis can't produce (see its own header), but the
+  // empty state below still needs to know a stale/invalid filter was in play so it
+  // can name the actual cause instead of just suggesting "clear the type filter".
+  const invalidTypesForBasis = types.filter((t) => !transactionTypesForBasis(basis).includes(t));
 
   return (
     <div className="max-w-7xl">
@@ -225,9 +231,15 @@ export default async function TransactionDetailPage({
           <InstructiveMessage
             title="No transactions in this range"
             body={
-              basis === "cash"
-                ? "Widen the date range, or clear the type filter, to see more. On the cash basis only rows with a recorded payment date appear — try the accrual basis if you expect unpaid bills or unsettled invoices here."
-                : "Widen the date range, or clear the type filter, to see more."
+              invalidTypesForBasis.length > 0
+                ? `The type filter includes ${invalidTypesForBasis
+                    .map((t) => TRANSACTION_TYPE_LABELS[t])
+                    .join(", ")}, which ${invalidTypesForBasis.length === 1 ? "does" : "do"} not occur on the ${REPORT_BASIS_LABELS[
+                    basis
+                  ].toLowerCase()} basis — it was ignored. Clear the type filter or switch basis to see it.`
+                : basis === "cash"
+                  ? "Widen the date range, or clear the type filter, to see more. On the cash basis only rows with a recorded payment date appear — try the accrual basis if you expect unpaid bills or unsettled invoices here."
+                  : "Widen the date range, or clear the type filter, to see more."
             }
           />
         ) : (

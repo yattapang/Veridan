@@ -1,8 +1,84 @@
 import { describe, expect, it } from "vitest";
 import { buildCurrentFxRate } from "../expenses/expense";
-import { buildCashOutEntries, type FinancialStatementData } from "./load";
+import { buildCashOutEntries, fetchAllPages, type FinancialStatementData } from "./load";
 import type { ReportDateRange } from "./period";
 import type { LedgerCostInput, LedgerExpenseInput } from "./transactions";
+
+/**
+ * `fetchAllPages` is the pager EVERY period-bounded query in this module now
+ * goes through (Fix 1 of the 2026-08 re-review): `invoice_payments`,
+ * `actual_costs` and `expenses` used to be plain `.select()` calls with no
+ * `.range()`, so a period with more than PostgREST's default 1,000-row cap
+ * silently truncated — for `actual_costs` specifically, that UNDER-reports
+ * Cost of Sales and OVERSTATES profit. These tests fake the pager boundary
+ * (the `(from, to) => {data, error}` callback a real Supabase `.range()` call
+ * would satisfy) rather than standing up a live DB, and prove the helper
+ * itself pages correctly — the same helper the two previously-paged queries
+ * (invoices, orders) already relied on, and that invoice_payments/
+ * actual_costs/expenses are now wired through identically (see load.ts).
+ */
+describe("fetchAllPages", () => {
+  const PAGE_SIZE = 1000;
+
+  function makeRows(count: number, offset: number): { id: number }[] {
+    return Array.from({ length: count }, (_, i) => ({ id: offset + i }));
+  }
+
+  it("assembles a COMPLETE set spanning multiple full pages plus a short final page", async () => {
+    // 2,500 rows total: two full 1,000-row pages (which is what a PostgREST
+    // response capped at db-max-rows=1000 looks like) and one 500-row page
+    // that signals the end. A caller not paging would see only the first 1,000.
+    const totalRows = 2 * PAGE_SIZE + 500;
+    const calls: { from: number; to: number }[] = [];
+
+    const { data, error } = await fetchAllPages<{ id: number }>((from, to) => {
+      calls.push({ from, to });
+      const remaining = totalRows - from;
+      const pageLength = Math.max(0, Math.min(PAGE_SIZE, remaining));
+      return Promise.resolve({ data: makeRows(pageLength, from), error: null });
+    });
+
+    expect(error).toBeNull();
+    expect(data).toHaveLength(totalRows);
+    // No row skipped or duplicated across the page boundary.
+    expect(data?.map((r) => r.id)).toEqual(makeRows(totalRows, 0).map((r) => r.id));
+    // Exactly the pages a 1,000-row cap requires: [0,999], [1000,1999], [2000,2999].
+    expect(calls).toEqual([
+      { from: 0, to: 999 },
+      { from: 1000, to: 1999 },
+      { from: 2000, to: 2999 },
+    ]);
+  });
+
+  it("stops after a SINGLE page when the first page already comes back short", async () => {
+    const calls: { from: number; to: number }[] = [];
+    const { data } = await fetchAllPages<{ id: number }>((from, to) => {
+      calls.push({ from, to });
+      return Promise.resolve({ data: makeRows(3, 0), error: null });
+    });
+    expect(data).toHaveLength(3);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("returns an empty set (not null/undefined rows) when the first page is empty", async () => {
+    const { data, error } = await fetchAllPages<{ id: number }>(() => Promise.resolve({ data: null, error: null }));
+    expect(error).toBeNull();
+    expect(data).toEqual([]);
+  });
+
+  it("propagates an error from a later page and stops paging — a partial set is never silently returned as complete", async () => {
+    const calls: { from: number; to: number }[] = [];
+    const { data, error } = await fetchAllPages<{ id: number }>((from, to) => {
+      calls.push({ from, to });
+      if (from === 0) return Promise.resolve({ data: makeRows(PAGE_SIZE, 0), error: null });
+      return Promise.resolve({ data: null, error: { message: "connection reset" } });
+    });
+    expect(data).toBeNull();
+    expect(error).toBe("connection reset");
+    // Paging stopped at the failing page rather than continuing past it.
+    expect(calls).toHaveLength(2);
+  });
+});
 
 /**
  * `buildCashOutEntries` is the pure half of the cash-flow loader — it takes

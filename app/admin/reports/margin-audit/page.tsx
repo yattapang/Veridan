@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { InstructiveMessage } from "@/components/admin/InstructiveMessage";
 import { formatPct, formatUsd } from "@/lib/quotes/format";
 import { ORDER_STATUS_LABELS } from "@/lib/orders/format";
-import { yearToDateRange, type ReportDateRange } from "@/lib/reports/period";
+import { parseReportDateRange, yearToDateRange } from "@/lib/reports/period";
 import { loadMarginAuditData } from "@/lib/reports/load";
 import { buildMarginAudit, VARIANCE_CATEGORY_LABELS } from "@/lib/reports/marginAudit";
 import { DateRangeFilter } from "../DateRangeFilter";
@@ -28,13 +28,12 @@ export default async function MarginAuditPage({
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const query = await searchParams;
-  const startParam = firstParam(query.start).trim();
-  const endParam = firstParam(query.end).trim();
-  const defaultRange = yearToDateRange();
-  const range: ReportDateRange = {
-    startIso: startParam || defaultRange.startIso,
-    endIso: endParam || defaultRange.endIso,
-  };
+  // A malformed or reversed range falls back to year-to-date rather than
+  // being passed through to the query layer — matching the export route
+  // (app/api/reports/margin-audit/export/route.ts), which already validates
+  // via parseExportRange, so the page and its export can no longer disagree
+  // on what an unpadded or garbled `?start=` means.
+  const range = parseReportDateRange(firstParam(query.start), firstParam(query.end)) ?? yearToDateRange();
 
   let supabase;
   try {

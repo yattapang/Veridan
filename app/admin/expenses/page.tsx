@@ -4,7 +4,7 @@ import { InstructiveMessage } from "@/components/admin/InstructiveMessage";
 import { formatJmd, formatUsd } from "@/lib/quotes/format";
 import { filterExpenses, parseExpensePaymentFilter } from "@/lib/expenses/expense";
 import type { ExpenseCategoryRow, ExpenseWithCategory } from "@/lib/expenses/types";
-import { jamaicaToday, yearToDateRange } from "@/lib/reports/period";
+import { jamaicaToday, parseReportDateRange, yearToDateRange } from "@/lib/reports/period";
 import { ExpenseFilters } from "./ExpenseFilters";
 import { ExpenseForm } from "./ExpenseForm";
 import { ExpenseListItem } from "./ExpenseListItem";
@@ -35,9 +35,13 @@ export default async function ExpensesPage({
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const query = await searchParams;
-  const defaultRange = yearToDateRange();
-  const startIso = firstParam(query.start).trim() || defaultRange.startIso;
-  const endIso = firstParam(query.end).trim() || defaultRange.endIso;
+  // A malformed or reversed range falls back to year-to-date rather than
+  // being passed through to the in-memory filter — matching the three
+  // already-migrated statement pages, so an unpadded `?start=2026-1-1`
+  // (which sorts wrongly as a plain string) can no longer silently hide rows.
+  const range = parseReportDateRange(firstParam(query.start), firstParam(query.end)) ?? yearToDateRange();
+  const startIso = range.startIso;
+  const endIso = range.endIso;
   const categoryId = firstParam(query.category).trim();
   const payment = parseExpensePaymentFilter(firstParam(query.payment));
   const today = jamaicaToday();

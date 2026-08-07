@@ -64,7 +64,7 @@ interface PnlOrderJoinRow {
  */
 const PAGE_SIZE = 1000;
 
-async function fetchAllPages<T>(
+export async function fetchAllPages<T>(
   page: (from: number, to: number) => PromiseLike<{ data: unknown; error: { message: string } | null }>,
 ): Promise<{ data: T[] | null; error: string | null }> {
   const all: T[] = [];
@@ -412,35 +412,43 @@ export async function loadFinancialStatementData(
         .order("invoice_number", { ascending: true })
         .range(from, to),
     ),
-    supabase
-      .from("invoice_payments")
-      .select(
-        "amount_jmd, paid_at, method, reference, invoices(invoice_number, invoice_type, quote_id, subtotal_jmd, amount_jmd, quotes(quote_ref), companies(name))",
-      )
-      .gte("paid_at", range.startIso)
-      .lte("paid_at", range.endIso),
-    supabase
-      .from("actual_costs")
-      .select(
-        "order_id, category, description, amount_usd, amount_jmd, incurred_date, paid_date, suppliers(name), orders(quotes(quote_ref), companies(name))",
-      )
-      .or(eitherDateInRange),
-    supabase
-      .from("expenses")
-      .select(
-        "description, vendor, amount_jmd, amount_usd, incurred_date, paid_date, payment_method, reference, expense_categories(name, label)",
-      )
-      .or(eitherDateInRange),
+    fetchAllPages<FinancialPaymentJoinRow>((from, to) =>
+      supabase
+        .from("invoice_payments")
+        .select(
+          "amount_jmd, paid_at, method, reference, invoices(invoice_number, invoice_type, quote_id, subtotal_jmd, amount_jmd, quotes(quote_ref), companies(name))",
+        )
+        .gte("paid_at", range.startIso)
+        .lte("paid_at", range.endIso)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+    fetchAllPages<FinancialCostJoinRow>((from, to) =>
+      supabase
+        .from("actual_costs")
+        .select(
+          "order_id, category, description, amount_usd, amount_jmd, incurred_date, paid_date, suppliers(name), orders(quotes(quote_ref), companies(name))",
+        )
+        .or(eitherDateInRange)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+    fetchAllPages<ExpenseJoinRow>((from, to) =>
+      supabase
+        .from("expenses")
+        .select(
+          "description, vendor, amount_jmd, amount_usd, incurred_date, paid_date, payment_method, reference, expense_categories(name, label)",
+        )
+        .or(eitherDateInRange)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
     loadOrderRates(supabase),
     loadCurrentFxRate(supabase),
   ]);
 
   if ("error" in orderRates) return { data: null, error: orderRates.error };
-  const loadError =
-    invoicesResult.error ??
-    paymentsResult.error?.message ??
-    costsResult.error?.message ??
-    expensesResult.error?.message;
+  const loadError = invoicesResult.error ?? paymentsResult.error ?? costsResult.error ?? expensesResult.error;
   if (loadError) return { data: null, error: loadError };
 
   const { quoteIdToOrderId, rateByOrderId } = orderRates;
@@ -468,7 +476,7 @@ export async function loadFinancialStatementData(
     ];
   });
 
-  const paymentRows = (paymentsResult.data as unknown as FinancialPaymentJoinRow[]) ?? [];
+  const paymentRows = paymentsResult.data ?? [];
   const payments: LedgerPaymentInput[] = paymentRows.map((p) => {
     // A part payment settles the GCT and the net in the proportion the
     // invoice was raised in, so the payment is pro-rated by the invoice's
@@ -499,7 +507,7 @@ export async function loadFinancialStatementData(
     reference: p.reference,
   }));
 
-  const costs: LedgerCostInput[] = ((costsResult.data as unknown as FinancialCostJoinRow[]) ?? []).map((c) => ({
+  const costs: LedgerCostInput[] = (costsResult.data ?? []).map((c) => ({
     orderId: c.order_id,
     category: c.category,
     amountUsd: c.amount_usd,
@@ -512,7 +520,7 @@ export async function loadFinancialStatementData(
     companyName: c.orders?.companies?.name ?? null,
   }));
 
-  const expenses: LedgerExpenseInput[] = ((expensesResult.data as unknown as ExpenseJoinRow[]) ?? []).map((e) => ({
+  const expenses: LedgerExpenseInput[] = (expensesResult.data ?? []).map((e) => ({
     // expense_category_id is NOT NULL behind an ON DELETE RESTRICT FK, so
     // this embed can only be null if the join itself failed — the fallback
     // keeps the statement rendering, and is visibly a fallback rather than a

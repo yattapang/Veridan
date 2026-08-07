@@ -358,7 +358,20 @@ export function buildTransactionLedger(
   basis: ReportBasis,
   filters: TransactionLedgerFilters = {},
 ): TransactionLedger {
-  const typeFilter = filters.types && filters.types.length > 0 ? new Set(filters.types) : null;
+  // A `?type=` filter can outlive a basis switch — `BasisToggle` preserves it
+  // verbatim across the toggle link (see app/admin/reports/BasisToggle.tsx),
+  // so a cash-only "Customer Payment" chip selected before switching to
+  // accrual would otherwise arrive here still set. Honouring it literally
+  // would filter the ledger down to a type this basis can never produce and
+  // render an all-J$0.00 report that looks like "no transactions" rather
+  // than "wrong basis". So only the subset of the requested types that this
+  // basis actually produces is applied; if NONE of the requested types
+  // survive that intersection, the filter is dropped entirely (same as no
+  // filter) instead of yielding a silently-empty ledger. Doing this here,
+  // rather than in the page, means the CSV/xlsx export routes — which call
+  // this function directly with the same raw `types` — get the same guard.
+  const requestedTypes = (filters.types ?? []).filter((t) => transactionTypesForBasis(basis).includes(t));
+  const typeFilter = requestedTypes.length > 0 ? new Set(requestedTypes) : null;
 
   const revenueRows: TransactionRow[] =
     basis === "cash" ? inputs.payments.map(paymentRow) : inputs.issuedInvoices.map(invoiceRow);
