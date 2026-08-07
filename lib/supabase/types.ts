@@ -52,7 +52,20 @@ export interface SupplierRow {
   updated_at: string;
 }
 
-/** §1.2 Products (Hardware Library) */
+/**
+ * §1.2 Products (Hardware Library)
+ *
+ * NOTE (2026-08-07): `products.generic_category` is a plain free-text
+ * column — its CHECK constraint was dropped by supabase/migrations/
+ * 20260807000001_managed_taxonomies.sql in favor of the admin-managed
+ * `product_categories_admin` table (lib/products/categoriesLoader.ts,
+ * app/admin/products/categories/ — NOT the unrelated marketing
+ * `product_categories` site_content section). This union type and
+ * PRODUCT_CATEGORIES are kept as the original 9 founder values for
+ * reference/fallback purposes only — a product's `generic_category` column
+ * may hold any string a founder has added via the managed picker, not just
+ * one of these literals.
+ */
 export type ProductCategory =
   | "locksets"
   | "closers"
@@ -75,6 +88,35 @@ export const PRODUCT_CATEGORIES: ProductCategory[] = [
   "frames",
   "other",
 ];
+
+/**
+ * product_categories_admin (2026-08-07, admin-managed category list) —
+ * see supabase/migrations/20260807000001_managed_taxonomies.sql and
+ * lib/taxonomies/taxonomyAdmin.ts. Deliberately NOT related to ProductRow
+ * by a foreign key: products.generic_category stays free text. This is
+ * the suggestion/management list, not a referential constraint —
+ * deleting a row here never touches a product. NOT the unrelated
+ * marketing `product_categories` site_content section.
+ */
+export interface ProductCategoryAdminRow {
+  id: string;
+  name: string;
+  label: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * product_categories_admin row + its computed usage count, for the admin
+ * CRUD list (/admin/products/categories). There's no FK from products to
+ * this table (by design), so `usageCount` isn't a DB join/aggregate; it's
+ * computed in JS from every product's `generic_category` string via
+ * lib/taxonomies/taxonomyAdmin.ts's computeTaxonomyUsageCounts.
+ */
+export interface ProductCategoryAdminWithUsageCount extends ProductCategoryAdminRow {
+  usageCount: number;
+}
 
 /**
  * §1.4 Phase 2A item_groups grade — ANSI/BHMA valid-value set (§8 FOUNDER
@@ -147,7 +189,18 @@ export interface ItemGroupMergeRow {
   merged_at: string;
 }
 
-/** §1.10 Companies */
+/**
+ * §1.10 Companies
+ *
+ * NOTE (2026-08-07): `companies.type` is a plain free-text column — its
+ * CHECK constraint was dropped by supabase/migrations/20260807000001_
+ * managed_taxonomies.sql in favor of the admin-managed `company_types`
+ * table (lib/companies/typesLoader.ts, app/admin/companies/types/). This
+ * union type and COMPANY_TYPES are kept as the original 5 founder values
+ * for reference/fallback purposes only — a company's `type` column may
+ * hold any string a founder has added via the managed picker, not just
+ * one of these literals.
+ */
 export type CompanyType =
   | "architect"
   | "contractor"
@@ -162,6 +215,34 @@ export const COMPANY_TYPES: CompanyType[] = [
   "fm",
   "supplier_contact",
 ];
+
+/**
+ * company_types (2026-08-07, admin-managed type list) — see
+ * supabase/migrations/20260807000001_managed_taxonomies.sql and
+ * lib/taxonomies/taxonomyAdmin.ts. Deliberately NOT related to CompanyRow
+ * by a foreign key: companies.type stays free text. This is the
+ * suggestion/management list, not a referential constraint — deleting a
+ * row here never touches a company.
+ */
+export interface CompanyTypeRow {
+  id: string;
+  name: string;
+  label: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * company_types row + its computed usage count, for the admin CRUD list
+ * (/admin/companies/types). There's no FK from companies to this table
+ * (by design), so `usageCount` isn't a DB join/aggregate; it's computed in
+ * JS from every company's `type` string via
+ * lib/taxonomies/taxonomyAdmin.ts's computeTaxonomyUsageCounts.
+ */
+export interface CompanyTypeWithUsageCount extends CompanyTypeRow {
+  usageCount: number;
+}
 
 export type CompanyStatus = "new" | "established";
 

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import type { CompanyRow, ContactRow, ProjectRow } from "@/lib/supabase/types";
+import { getManagedCompanyTypes } from "@/lib/companies/typesLoader";
 import { InstructiveMessage } from "@/components/admin/InstructiveMessage";
 import { CompanyForm } from "../CompanyForm";
 import { ContactForm } from "./ContactForm";
@@ -87,6 +88,8 @@ export default async function CompanyDetailPage({
     // query fails while the company record itself loaded fine.
   }
 
+  const companyTypes = await getManagedCompanyTypes(supabase);
+
   let projects: ProjectRow[] = [];
   try {
     const { data, error } = await supabase
@@ -118,7 +121,7 @@ export default async function CompanyDetailPage({
         <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">
           Company details
         </h2>
-        <CompanyForm company={company} />
+        <CompanyForm company={company} companyTypes={companyTypes} />
       </section>
 
       <section className="mt-10">

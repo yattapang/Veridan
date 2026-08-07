@@ -2,6 +2,8 @@
 
 import { useState, useTransition } from "react";
 import type { ItemGroupRow, ProductWithSupplier, SupplierRow } from "@/lib/supabase/types";
+import type { ManagedProductCategory } from "@/lib/products/categoriesLoader";
+import type { DistinctFinishValues } from "@/lib/products/finishes";
 import { setProductActive } from "./actions";
 import { ProductForm } from "./ProductForm";
 
@@ -24,11 +26,15 @@ export function ProductListItem({
   product,
   suppliers,
   itemGroups,
+  productCategories,
+  distinctFinishes,
   priceProvenance,
 }: {
   product: ProductWithSupplier;
   suppliers: SupplierRow[];
   itemGroups: ItemGroupRow[];
+  productCategories: ManagedProductCategory[];
+  distinctFinishes: DistinctFinishValues;
   priceProvenance?: ProductPriceProvenance | null;
 }) {
   const [editing, setEditing] = useState(false);
@@ -46,7 +52,14 @@ export function ProductListItem({
   if (editing) {
     return (
       <li className="border-b border-veridan-warm-gray-light py-4 last:border-b-0">
-        <ProductForm product={product} suppliers={suppliers} itemGroups={itemGroups} onSaved={() => setEditing(false)} />
+        <ProductForm
+          product={product}
+          suppliers={suppliers}
+          itemGroups={itemGroups}
+          productCategories={productCategories}
+          distinctFinishes={distinctFinishes}
+          onSaved={() => setEditing(false)}
+        />
         <button
           type="button"
           onClick={() => setEditing(false)}

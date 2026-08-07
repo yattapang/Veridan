@@ -16,11 +16,17 @@
 import type { createClient } from "@/lib/supabase/server";
 import type {
   ActualCostCategory,
+  BusinessParameterRow,
   InvoiceStatus,
   InvoiceType,
   OrderStatus,
 } from "@/lib/supabase/types";
-import type { CashInEntry } from "./cashflow";
+import { ACTUAL_COST_CATEGORY_LABELS } from "../orders/format";
+import { buildCurrentFxRate, expenseAmountJmd, type CurrentFxRate } from "../expenses/expense";
+import type { CashInEntry, CashOutEntry } from "./cashflow";
+import type { IssuedInvoiceInput } from "./incomeStatement";
+import { jamaicaDateFromTimestamp } from "./period";
+import type { LedgerCostInput, LedgerExpenseInput, LedgerPaymentInput } from "./transactions";
 import {
   quotedCategoriesFromOrigins,
   type MarginAuditCostInput,
@@ -30,7 +36,7 @@ import {
   type QuoteOriginCostRow,
 } from "./marginAudit";
 import { isWithinReportRange, type ReportDateRange } from "./period";
-import type { OrderRateLookup, PnlCostInput, PnlPaymentInput } from "./pnl";
+import { costAmountJmd, type OrderRateLookup, type PnlCostInput, type PnlPaymentInput } from "./pnl";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -306,4 +312,297 @@ export async function loadOrdersRawData(
   }));
 
   return { data: rows, error: null };
+}
+
+// ---------------------------------------------------------------------------
+// Financial statements (2026-08-07 restructure) — income statement, cash
+// flow with real outflows, and the transaction ledger.
+//
+// ONE LOADER, THREE REPORTS. The income statement, the cash-flow statement
+// and the transaction ledger all read the same four real-data sources
+// (issued invoices, invoice_payments, actual_costs, expenses) and differ
+// only in which dates they select on and how they present the rows. Loading
+// them together here is what makes it impossible for the three pages to
+// disagree about what a period contains — which was the founder's actual
+// complaint about the old reports.
+//
+// RANGE FILTERING IS DELIBERATELY WIDE AT THE QUERY LAYER. Every cost and
+// expense carries TWO dates (incurred / paid) and the basis decides which
+// one applies, so the query fetches a row when EITHER date falls in range
+// and the pure functions in incomeStatement.ts do the precise selection. A
+// narrow query would silently drop a December bill paid in January out of
+// the cash-basis January column.
+// ---------------------------------------------------------------------------
+
+/**
+ * The CURRENT USD->JMD rate from live business parameters, for converting
+ * USD-only OPERATING EXPENSES at render time (see lib/expenses/expense.ts
+ * for why a non-order expense has no locked rate to use). Order-linked
+ * `actual_costs` are unaffected — they keep converting at their own order's
+ * quote-locked rate.
+ *
+ * A failed read yields `available: false` rather than a fabricated default,
+ * so the report states that USD-only expenses could not be converted instead
+ * of quietly converting at the seed value.
+ */
+export async function loadCurrentFxRate(supabase: SupabaseServerClient): Promise<CurrentFxRate> {
+  const { data, error } = await supabase
+    .from("business_parameters")
+    .select("key, value")
+    .in("key", ["fx_bank_sell_rate_usd_jmd", "fx_risk_buffer_pct"]);
+
+  if (error || !data) return buildCurrentFxRate(null, null);
+
+  const rows = data as Pick<BusinessParameterRow, "key" | "value">[];
+  const valueFor = (key: string): number | null => {
+    const raw = rows.find((r) => r.key === key)?.value?.value;
+    const n = typeof raw === "string" ? Number(raw) : raw;
+    return typeof n === "number" && Number.isFinite(n) ? n : null;
+  };
+
+  return buildCurrentFxRate(valueFor("fx_bank_sell_rate_usd_jmd"), valueFor("fx_risk_buffer_pct"));
+}
+
+interface IssuedInvoiceJoinRow {
+  invoice_number: string;
+  quote_id: string;
+  amount_jmd: number;
+  issued_at: string | null;
+  status: InvoiceStatus;
+  quotes: { quote_ref: string } | null;
+  companies: { name: string } | null;
+}
+
+interface FinancialCostJoinRow {
+  order_id: string;
+  category: ActualCostCategory;
+  description: string | null;
+  amount_usd: number | null;
+  amount_jmd: number | null;
+  incurred_date: string;
+  paid_date: string | null;
+  suppliers: { name: string } | null;
+  orders: {
+    quotes: { quote_ref: string } | null;
+    companies: { name: string } | null;
+  } | null;
+}
+
+interface ExpenseJoinRow {
+  description: string;
+  vendor: string | null;
+  amount_jmd: number | null;
+  amount_usd: number | null;
+  incurred_date: string;
+  paid_date: string | null;
+  payment_method: string | null;
+  reference: string | null;
+  expense_categories: { name: string; label: string } | null;
+}
+
+interface FinancialPaymentJoinRow {
+  amount_jmd: number;
+  paid_at: string;
+  method: string | null;
+  reference: string | null;
+  invoices: {
+    invoice_number: string;
+    invoice_type: InvoiceType;
+    quote_id: string;
+    quotes: { quote_ref: string } | null;
+    companies: { name: string } | null;
+  } | null;
+}
+
+export interface FinancialStatementData {
+  /** Accrual-basis revenue events — invoices issued (non-void) within the range. */
+  issuedInvoices: IssuedInvoiceInput[];
+  /** Cash-basis revenue events, in the ledger shape (a superset of the income statement's). */
+  payments: LedgerPaymentInput[];
+  /** The same payments in the cash-flow statement's inflow shape. */
+  cashIn: CashInEntry[];
+  costs: LedgerCostInput[];
+  expenses: LedgerExpenseInput[];
+  rateByOrderId: OrderRateLookup;
+  fx: CurrentFxRate;
+}
+
+export async function loadFinancialStatementData(
+  supabase: SupabaseServerClient,
+  range: ReportDateRange,
+): Promise<{ data: FinancialStatementData | null; error: string | null }> {
+  const eitherDateInRange =
+    `and(incurred_date.gte.${range.startIso},incurred_date.lte.${range.endIso}),` +
+    `and(paid_date.gte.${range.startIso},paid_date.lte.${range.endIso})`;
+
+  const [invoicesResult, paymentsResult, costsResult, expensesResult, ordersResult, fx] = await Promise.all([
+    // Issued, non-void invoices, fetched WITHOUT a server-side issued_at
+    // filter and narrowed in memory below: issued_at is a timestamptz while
+    // the range is a pair of Jamaica-local calendar dates, so a raw
+    // gte/lte on the instant would misfile an invoice issued late in the
+    // evening (and, at a month boundary, into the wrong column). Same
+    // timezone-safety approach loadMarginAuditData already takes, at
+    // small-importer row counts.
+    supabase
+      .from("invoices")
+      .select("invoice_number, quote_id, amount_jmd, issued_at, status, quotes(quote_ref), companies(name)")
+      .neq("status", "void")
+      .not("issued_at", "is", null),
+    supabase
+      .from("invoice_payments")
+      .select(
+        "amount_jmd, paid_at, method, reference, invoices(invoice_number, invoice_type, quote_id, quotes(quote_ref), companies(name))",
+      )
+      .gte("paid_at", range.startIso)
+      .lte("paid_at", range.endIso),
+    supabase
+      .from("actual_costs")
+      .select(
+        "order_id, category, description, amount_usd, amount_jmd, incurred_date, paid_date, suppliers(name), orders(quotes(quote_ref), companies(name))",
+      )
+      .or(eitherDateInRange),
+    supabase
+      .from("expenses")
+      .select(
+        "description, vendor, amount_jmd, amount_usd, incurred_date, paid_date, payment_method, reference, expense_categories(name, label)",
+      )
+      .or(eitherDateInRange),
+    supabase.from("orders").select("id, quote_id, quotes(fx_snapshot)"),
+    loadCurrentFxRate(supabase),
+  ]);
+
+  const loadError =
+    invoicesResult.error ?? paymentsResult.error ?? costsResult.error ?? expensesResult.error ?? ordersResult.error;
+  if (loadError) return { data: null, error: loadError.message };
+
+  const orders = (ordersResult.data as unknown as PnlOrderJoinRow[]) ?? [];
+  const quoteIdToOrderId = new Map(orders.map((o) => [o.quote_id, o.id]));
+  const rateByOrderId: OrderRateLookup = {};
+  for (const o of orders) {
+    const rate = o.quotes?.fx_snapshot?.effective_rate;
+    if (rate != null) rateByOrderId[o.id] = rate;
+  }
+
+  const issuedInvoices: IssuedInvoiceInput[] = (
+    (invoicesResult.data as unknown as IssuedInvoiceJoinRow[]) ?? []
+  ).flatMap((inv) => {
+    if (!inv.issued_at) return [];
+    const issuedDateIso = jamaicaDateFromTimestamp(inv.issued_at);
+    if (!isWithinReportRange(issuedDateIso, range)) return [];
+    return [
+      {
+        amountJmd: inv.amount_jmd,
+        issuedDateIso,
+        orderId: quoteIdToOrderId.get(inv.quote_id) ?? null,
+        quoteRef: inv.quotes?.quote_ref ?? "—",
+        invoiceNumber: inv.invoice_number,
+      },
+    ];
+  });
+
+  const paymentRows = (paymentsResult.data as unknown as FinancialPaymentJoinRow[]) ?? [];
+  const payments: LedgerPaymentInput[] = paymentRows.map((p) => ({
+    amountJmd: p.amount_jmd,
+    paidAtIso: p.paid_at,
+    orderId: p.invoices?.quote_id ? (quoteIdToOrderId.get(p.invoices.quote_id) ?? null) : null,
+    quoteRef: p.invoices?.quotes?.quote_ref ?? "—",
+    invoiceNumber: p.invoices?.invoice_number ?? "—",
+    companyName: p.invoices?.companies?.name ?? null,
+    method: p.method,
+    reference: p.reference,
+  }));
+
+  const cashIn: CashInEntry[] = paymentRows.map((p) => ({
+    amountJmd: p.amount_jmd,
+    paidAtIso: p.paid_at,
+    invoiceNumber: p.invoices?.invoice_number ?? "—",
+    invoiceType: p.invoices?.invoice_type ?? "deposit",
+    quoteRef: p.invoices?.quotes?.quote_ref ?? "—",
+    method: p.method,
+    reference: p.reference,
+  }));
+
+  const costs: LedgerCostInput[] = ((costsResult.data as unknown as FinancialCostJoinRow[]) ?? []).map((c) => ({
+    orderId: c.order_id,
+    category: c.category,
+    amountUsd: c.amount_usd,
+    amountJmd: c.amount_jmd,
+    incurredDateIso: c.incurred_date,
+    paidDateIso: c.paid_date,
+    description: c.description,
+    supplierName: c.suppliers?.name ?? null,
+    quoteRef: c.orders?.quotes?.quote_ref ?? "—",
+    companyName: c.orders?.companies?.name ?? null,
+  }));
+
+  const expenses: LedgerExpenseInput[] = ((expensesResult.data as unknown as ExpenseJoinRow[]) ?? []).map((e) => ({
+    // expense_category_id is NOT NULL behind an ON DELETE RESTRICT FK, so
+    // this embed can only be null if the join itself failed — the fallback
+    // keeps the statement rendering, and is visibly a fallback rather than a
+    // silently-dropped row.
+    categoryName: e.expense_categories?.name ?? "uncategorized",
+    categoryLabel: e.expense_categories?.label ?? "Uncategorized",
+    amountJmd: e.amount_jmd,
+    amountUsd: e.amount_usd,
+    incurredDateIso: e.incurred_date,
+    paidDateIso: e.paid_date,
+    description: e.description,
+    vendor: e.vendor,
+    reference: e.reference,
+  }));
+
+  return { data: { issuedInvoices, payments, cashIn, costs, expenses, rateByOrderId, fx }, error: null };
+}
+
+/**
+ * Cash OUT entries for the cash-flow statement, derived from the already
+ * loaded rows. Only rows carrying a `paid_date` appear — an unpaid bill is
+ * not a cash movement (see lib/reports/cashflow.ts's header). A row whose
+ * amount cannot be resolved to JMD is reported in `unconvertedUsd` rather
+ * than counted as zero.
+ */
+export function buildCashOutEntries(data: FinancialStatementData): {
+  entries: CashOutEntry[];
+  unconvertedUsd: number;
+} {
+  const entries: CashOutEntry[] = [];
+  let unconvertedUsd = 0;
+
+  for (const c of data.costs) {
+    if (c.paidDateIso == null) continue;
+    const amountJmd = costAmountJmd(c, data.rateByOrderId);
+    if (amountJmd == null) {
+      unconvertedUsd += c.amountUsd ?? 0;
+      continue;
+    }
+    entries.push({
+      amountJmd,
+      paidAtIso: c.paidDateIso,
+      kind: "cost_of_sales",
+      categoryLabel: ACTUAL_COST_CATEGORY_LABELS[c.category],
+      description: c.description,
+      party: c.supplierName ?? c.companyName,
+      reference: c.quoteRef,
+    });
+  }
+
+  for (const e of data.expenses) {
+    if (e.paidDateIso == null) continue;
+    const amountJmd = expenseAmountJmd(e, data.fx);
+    if (amountJmd == null) {
+      unconvertedUsd += e.amountUsd ?? 0;
+      continue;
+    }
+    entries.push({
+      amountJmd,
+      paidAtIso: e.paidDateIso,
+      kind: "operating_expense",
+      categoryLabel: e.categoryLabel,
+      description: e.description,
+      party: e.vendor,
+      reference: e.reference,
+    });
+  }
+
+  return { entries, unconvertedUsd };
 }

@@ -40,10 +40,23 @@ export function jamaicaMonthKeyFromTimestamp(instant: string | Date): string {
   return `${shifted.getUTCFullYear()}-${pad2(shifted.getUTCMonth() + 1)}`;
 }
 
+/**
+ * `YYYY-MM-DD` for a `timestamptz` instant, converted to Jamaica local time
+ * (fixed UTC-5, see header). Used to give an accrual-basis revenue event a
+ * calendar date: `invoices.issued_at` is a timestamptz, but an income
+ * statement buckets by calendar day, and an invoice issued at 8pm Jamaica
+ * time must not land in the next UTC day (or, at a month boundary, the next
+ * month's column).
+ */
+export function jamaicaDateFromTimestamp(instant: string | Date): string {
+  const d = typeof instant === "string" ? new Date(instant) : instant;
+  const shifted = new Date(d.getTime() - JAMAICA_OFFSET_MS);
+  return `${shifted.getUTCFullYear()}-${pad2(shifted.getUTCMonth() + 1)}-${pad2(shifted.getUTCDate())}`;
+}
+
 /** Jamaica-local `YYYY-MM-DD` for "today" (fixed UTC-5), mirroring jamaicaYear's approach. */
 export function jamaicaToday(now: Date = new Date()): string {
-  const shifted = new Date(now.getTime() - JAMAICA_OFFSET_MS);
-  return `${shifted.getUTCFullYear()}-${pad2(shifted.getUTCMonth() + 1)}-${pad2(shifted.getUTCDate())}`;
+  return jamaicaDateFromTimestamp(now);
 }
 
 export interface ReportDateRange {

@@ -4,20 +4,27 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
-import { COMPANY_TYPES, type CompanyStatus, type CompanyType } from "@/lib/supabase/types";
+import type { CompanyStatus } from "@/lib/supabase/types";
 
 export type CompanyFormResult =
   | { ok: true; error?: undefined }
   | { ok: false; error: string };
 
-function isCompanyType(value: unknown): value is CompanyType {
-  return typeof value === "string" && (COMPANY_TYPES as string[]).includes(value);
-}
-
 function isCompanyStatus(value: unknown): value is CompanyStatus {
   return value === "new" || value === "established";
 }
 
+/**
+ * `companies.type` is now a plain free-text column (2026-08-07 — the CHECK
+ * constraint that limited it to 5 fixed values was dropped by
+ * supabase/migrations/20260807000001_managed_taxonomies.sql in favor of
+ * the admin-managed `company_types` table). So this only requires a
+ * non-blank value rather than checking it against a fixed set — the
+ * <select> in CompanyForm.tsx is what constrains the picker's *offered*
+ * options; the server action's job is just to reject a genuinely empty
+ * submission, mirroring how app/admin/articles/actions.ts's
+ * saveArticleFields treats the already-free-text `category` field.
+ */
 function parseCompanyFields(
   formData: FormData
 ): { ok: true; fields: Record<string, unknown> } | { ok: false; error: string } {
@@ -26,9 +33,9 @@ function parseCompanyFields(
     return { ok: false, error: "Company name is required." };
   }
 
-  const type = formData.get("type");
-  if (!isCompanyType(type)) {
-    return { ok: false, error: "Choose a valid company type." };
+  const type = String(formData.get("type") ?? "").trim();
+  if (!type) {
+    return { ok: false, error: "Choose a company type." };
   }
 
   const status = formData.get("status") ?? "new";

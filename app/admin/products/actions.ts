@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
-import { CURRENCY_CODES, PRODUCT_CATEGORIES, type CurrencyCode, type ProductCategory } from "@/lib/supabase/types";
+import { CURRENCY_CODES, type CurrencyCode } from "@/lib/supabase/types";
 
 export type ProductFormResult =
   | { ok: true; error?: undefined }
@@ -17,11 +17,16 @@ function isCurrencyCode(value: unknown): value is CurrencyCode {
   return typeof value === "string" && (CURRENCY_CODES as string[]).includes(value);
 }
 
-function isProductCategory(value: unknown): value is ProductCategory {
-  return typeof value === "string" && (PRODUCT_CATEGORIES as string[]).includes(value);
-}
-
-/** Reads and validates the product field set (§1.2) from a FormData payload. */
+/**
+ * Reads and validates the product field set (§1.2) from a FormData
+ * payload. `generic_category` is now a plain free-text column (2026-08-07
+ * — the CHECK constraint that limited it to 9 fixed values was dropped by
+ * supabase/migrations/20260807000001_managed_taxonomies.sql in favor of
+ * the admin-managed `product_categories_admin` table), so this only
+ * requires a non-blank value rather than checking it against a fixed set —
+ * the <select> in ProductForm.tsx is what constrains the picker's
+ * *offered* options.
+ */
 function parseProductFields(
   formData: FormData
 ): { ok: true; fields: Record<string, unknown> } | { ok: false; error: string } {
@@ -30,9 +35,9 @@ function parseProductFields(
     return { ok: false, error: "Description is required." };
   }
 
-  const category = formData.get("generic_category");
-  if (!isProductCategory(category)) {
-    return { ok: false, error: "Choose a valid category." };
+  const category = String(formData.get("generic_category") ?? "").trim();
+  if (!category) {
+    return { ok: false, error: "Choose a category." };
   }
 
   const unit = String(formData.get("unit") ?? "").trim();

@@ -39,6 +39,7 @@ const NAV_SECTIONS: NavSection[] = [
     heading: "Finance",
     items: [
       { label: "Invoices", href: "/admin/invoices" },
+      { label: "Expenses", href: "/admin/expenses" },
       { label: "Reports", href: "/admin/reports" },
       { label: "Overrides", href: "/admin/overrides" },
     ],

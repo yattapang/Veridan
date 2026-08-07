@@ -1,20 +1,24 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState, useEffect, useRef, useState, useTransition } from "react";
 import {
   CURRENCY_CODES,
   GRADE_VALUES,
-  PRODUCT_CATEGORIES,
   type ItemGroupRow,
   type ProductRow,
   type SupplierRow,
 } from "@/lib/supabase/types";
+import { buildTaxonomyOptions } from "@/lib/taxonomies/taxonomyAdmin";
+import type { ManagedProductCategory } from "@/lib/products/categoriesLoader";
+import type { DistinctFinishValues } from "@/lib/products/finishes";
 import {
   createItemGroupInline,
   createProduct,
   updateProduct,
   type ProductFormResult,
 } from "./actions";
+import { createProductCategoryInline } from "./categories/actions";
 
 const initialProductFormResult: ProductFormResult = { ok: true };
 
@@ -22,32 +26,34 @@ const inputClass =
   "w-full rounded-md border border-veridan-warm-gray-light bg-white px-3 py-2 text-sm text-veridan-ink focus:border-veridan-accent focus:outline-none";
 const labelClass = "block text-xs font-medium uppercase tracking-wide text-veridan-warm-gray";
 
-const CATEGORY_LABELS: Record<string, string> = {
-  locksets: "Locksets",
-  closers: "Closers",
-  hinges: "Hinges",
-  exit_devices: "Exit devices",
-  access_control: "Access control",
-  ironmongery: "Ironmongery",
-  signage: "Signage",
-  frames: "Frames",
-  other: "Other",
-};
-
 /**
  * Shared create/edit form for a Hardware Library product (Task 11).
  * `product` present means edit mode (bound to updateProduct); absent
  * means the "new product" form (bound to createProduct).
+ *
+ * `productCategories` is the DB-first managed list (lib/products/
+ * categoriesLoader.ts, falling back to the original 9 hardcoded values
+ * when the table is unreachable/empty), read by the server component and
+ * passed down here. Founder feedback 2026-08-07 ("Product Category should
+ * also allow addition of New Categories in the drop down") — the Category
+ * picker now offers an inline "+ New category" quick-create, exactly like
+ * the item-group picker below it (Task 31). `distinctFinishes` is the set
+ * of every distinct value already used for the three finish fields,
+ * server-loaded (lib/products/finishes.ts), for the datalist type-aheads.
  */
 export function ProductForm({
   product,
   suppliers,
   itemGroups,
+  productCategories,
+  distinctFinishes,
   onSaved,
 }: {
   product?: ProductRow;
   suppliers: SupplierRow[];
   itemGroups: ItemGroupRow[];
+  productCategories: ManagedProductCategory[];
+  distinctFinishes: DistinctFinishValues;
   onSaved?: () => void;
 }) {
   const action = product ? updateProduct.bind(null, product.id) : createProduct;
@@ -58,6 +64,45 @@ export function ProductForm({
   const formRef = useRef<HTMLFormElement>(null);
   const wasPending = useRef(false);
   const idSuffix = product?.id ?? "new";
+
+  // Inline product-category quick-create (founder feedback 2026-08-07).
+  // Same pattern as the item-group quick-create below: categories created
+  // inline are tracked separately and merged with the server-provided
+  // `productCategories` list at render time so a category created moments
+  // ago still shows up before the next server round-trip refreshes it.
+  const [locallyCreatedCategories, setLocallyCreatedCategories] = useState<ManagedProductCategory[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState(
+    product?.generic_category ?? productCategories[0]?.name ?? ""
+  );
+  const [creatingCategory, setCreatingCategory] = useState(false);
+  const [newCategoryLabel, setNewCategoryLabel] = useState("");
+  const [categoryError, setCategoryError] = useState<string | null>(null);
+  const [categoryPending, startCategoryTransition] = useTransition();
+
+  const knownCategoryIds = new Set(productCategories.map((c) => c.id));
+  const mergedCategories = [
+    ...productCategories,
+    ...locallyCreatedCategories.filter((c) => !knownCategoryIds.has(c.id)),
+  ];
+  const categoryOptions = buildTaxonomyOptions(mergedCategories, selectedCategory);
+
+  function handleCreateCategory() {
+    setCategoryError(null);
+    startCategoryTransition(async () => {
+      const result = await createProductCategoryInline(newCategoryLabel);
+      if (!result.ok) {
+        setCategoryError(result.error);
+        return;
+      }
+      setLocallyCreatedCategories((prev) => [
+        ...prev,
+        { id: result.id, name: result.name, label: result.label, sort_order: 0 },
+      ]);
+      setSelectedCategory(result.name);
+      setNewCategoryLabel("");
+      setCreatingCategory(false);
+    });
+  }
 
   // Inline item-group quick-create (Task 31). Kept local to this form
   // instance rather than a separate component since it needs to write the
@@ -128,21 +173,74 @@ export function ProductForm({
       </div>
 
       <div>
-        <label className={labelClass} htmlFor={`category-${idSuffix}`}>
-          Category
-        </label>
+        <div className="flex items-center justify-between">
+          <label className={labelClass} htmlFor={`category-${idSuffix}`}>
+            Category
+          </label>
+          <Link
+            href="/admin/products/categories"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[11px] font-medium text-veridan-accent-text underline underline-offset-2 hover:text-veridan-ink"
+          >
+            Manage categories
+          </Link>
+        </div>
         <select
           id={`category-${idSuffix}`}
           name="generic_category"
-          defaultValue={product?.generic_category ?? "locksets"}
+          value={selectedCategory}
+          onChange={(e) => setSelectedCategory(e.target.value)}
           className={`${inputClass} mt-1`}
         >
-          {PRODUCT_CATEGORIES.map((c) => (
-            <option key={c} value={c}>
-              {CATEGORY_LABELS[c] ?? c}
+          {categoryOptions.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
             </option>
           ))}
         </select>
+        {!creatingCategory ? (
+          <button
+            type="button"
+            onClick={() => setCreatingCategory(true)}
+            className="mt-1 text-xs font-medium text-veridan-accent underline underline-offset-2 hover:text-veridan-accent-soft"
+          >
+            + New category
+          </button>
+        ) : (
+          <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-veridan-warm-gray-light bg-veridan-warm-gray-pale p-2">
+            <input
+              type="text"
+              value={newCategoryLabel}
+              onChange={(e) => setNewCategoryLabel(e.target.value)}
+              placeholder="Category name"
+              className={`${inputClass} max-w-[12rem]`}
+            />
+            <button
+              type="button"
+              onClick={handleCreateCategory}
+              disabled={categoryPending || !newCategoryLabel.trim()}
+              className="rounded-md bg-veridan-ink px-3 py-2 text-xs font-medium uppercase tracking-wide text-veridan-paper disabled:opacity-50"
+            >
+              {categoryPending ? "Creating…" : "Create"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setCreatingCategory(false);
+                setCategoryError(null);
+              }}
+              className="text-xs text-veridan-warm-gray underline underline-offset-2 hover:text-veridan-ink"
+            >
+              Cancel
+            </button>
+            {categoryError && (
+              <p role="alert" className="w-full text-xs text-red-600">
+                {categoryError}
+              </p>
+            )}
+          </div>
+        )}
       </div>
 
       <div>
@@ -185,33 +283,91 @@ export function ProductForm({
         />
       </div>
 
-      <div>
-        <label className={labelClass} htmlFor={`specified-finish-${idSuffix}`}>
-          Specified finish
-        </label>
-        <input
-          id={`specified-finish-${idSuffix}`}
-          type="text"
-          name="specified_finish"
-          placeholder="What the architect's schedule calls for"
-          defaultValue={product?.specified_finish ?? ""}
-          className={`${inputClass} mt-1`}
-        />
-      </div>
+      {/*
+        Finish group (founder feedback 2026-08-07: "the specified finish,
+        and the finish code are not side by side or not intuitive" +
+        "the finish should allow drop down options that when typed data
+        is entered if it already exists then it is filtered"). All three
+        finish-related fields — specified_finish (what the architect's
+        schedule calls for), supplied_finish (what will actually ship),
+        finish_code (the short BHMA code) — are grouped together, side by
+        side, in this labelled fieldset, in that order. Each is a plain
+        text input with a native HTML <datalist> type-ahead
+        (list={id}-list) populated from every DISTINCT value already used
+        for that column across the Hardware Library (server-loaded by
+        app/admin/products/page.tsx via lib/products/finishes.ts's
+        collectDistinctFinishValues) — typing filters to existing values
+        (native browser behavior) while still allowing any new value.
+      */}
+      <fieldset className="sm:col-span-2 rounded-md border border-veridan-warm-gray-light p-3">
+        <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-veridan-warm-gray">
+          Finish
+        </legend>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <div>
+            <label className={labelClass} htmlFor={`specified-finish-${idSuffix}`}>
+              Specified finish
+            </label>
+            <input
+              id={`specified-finish-${idSuffix}`}
+              type="text"
+              name="specified_finish"
+              list={`specified-finish-list-${idSuffix}`}
+              placeholder="US32D, Satin Chrome…"
+              defaultValue={product?.specified_finish ?? ""}
+              className={`${inputClass} mt-1`}
+            />
+            <datalist id={`specified-finish-list-${idSuffix}`}>
+              {distinctFinishes.specifiedFinishes.map((v) => (
+                <option key={v} value={v} />
+              ))}
+            </datalist>
+            <p className="mt-1 text-[11px] text-veridan-warm-gray">What the architect&apos;s schedule calls for.</p>
+          </div>
 
-      <div>
-        <label className={labelClass} htmlFor={`supplied-finish-${idSuffix}`}>
-          Supplied finish
-        </label>
-        <input
-          id={`supplied-finish-${idSuffix}`}
-          type="text"
-          name="supplied_finish"
-          placeholder="Defaults to Satin Stainless Steel / US32D if left blank"
-          defaultValue={product?.supplied_finish ?? ""}
-          className={`${inputClass} mt-1`}
-        />
-      </div>
+          <div>
+            <label className={labelClass} htmlFor={`supplied-finish-${idSuffix}`}>
+              Supplied finish
+            </label>
+            <input
+              id={`supplied-finish-${idSuffix}`}
+              type="text"
+              name="supplied_finish"
+              list={`supplied-finish-list-${idSuffix}`}
+              placeholder="Defaults to Satin Stainless Steel / US32D if left blank"
+              defaultValue={product?.supplied_finish ?? ""}
+              className={`${inputClass} mt-1`}
+            />
+            <datalist id={`supplied-finish-list-${idSuffix}`}>
+              {distinctFinishes.suppliedFinishes.map((v) => (
+                <option key={v} value={v} />
+              ))}
+            </datalist>
+            <p className="mt-1 text-[11px] text-veridan-warm-gray">What will actually ship.</p>
+          </div>
+
+          <div>
+            <label className={labelClass} htmlFor={`finish-code-${idSuffix}`}>
+              Finish code
+            </label>
+            <input
+              id={`finish-code-${idSuffix}`}
+              type="text"
+              name="finish_code"
+              list={`finish-code-list-${idSuffix}`}
+              placeholder="US32D, US26D…"
+              defaultValue={product?.finish_code ?? ""}
+              className={`${inputClass} mt-1`}
+            />
+            <datalist id={`finish-code-list-${idSuffix}`}>
+              {distinctFinishes.finishCodes.map((v) => (
+                <option key={v} value={v} />
+              ))}
+            </datalist>
+            <p className="mt-1 text-[11px] text-veridan-warm-gray">Short BHMA code, e.g. US32D.</p>
+          </div>
+        </div>
+      </fieldset>
 
       <div>
         <label className={labelClass} htmlFor={`supplier-${idSuffix}`}>
@@ -306,20 +462,6 @@ export function ProductForm({
             )}
           </div>
         )}
-      </div>
-
-      <div>
-        <label className={labelClass} htmlFor={`finish-code-${idSuffix}`}>
-          Finish code
-        </label>
-        <input
-          id={`finish-code-${idSuffix}`}
-          type="text"
-          name="finish_code"
-          placeholder="US32D, US26D…"
-          defaultValue={product?.finish_code ?? ""}
-          className={`${inputClass} mt-1`}
-        />
       </div>
 
       <div>

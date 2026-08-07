@@ -14,12 +14,25 @@ export function ExportLinks({
   links,
   startIso,
   endIso,
+  extraQuery,
 }: {
   links: ExportLink[];
   startIso: string;
   endIso: string;
+  /**
+   * Any additional report parameters the download must carry — the reporting
+   * basis, the ledger's type filter. Without this a founder looking at a
+   * cash-basis statement would download the accrual one, which is exactly
+   * the kind of quiet mismatch this restructure exists to eliminate.
+   */
+  extraQuery?: Record<string, string | string[] | undefined>;
 }) {
-  const query = `?from=${encodeURIComponent(startIso)}&to=${encodeURIComponent(endIso)}`;
+  const params = new URLSearchParams({ from: startIso, to: endIso });
+  for (const [key, value] of Object.entries(extraQuery ?? {})) {
+    if (value == null) continue;
+    for (const v of Array.isArray(value) ? value : [value]) params.append(key, v);
+  }
+  const query = `?${params.toString()}`;
   return (
     <div className="flex flex-wrap gap-2">
       {links.map((link) => (

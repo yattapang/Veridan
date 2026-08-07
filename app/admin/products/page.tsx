@@ -2,12 +2,13 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import {
   GRADE_VALUES,
-  PRODUCT_CATEGORIES,
   type ItemGroupRow,
   type ProductWithSupplier,
   type SupplierRow,
 } from "@/lib/supabase/types";
 import { hasAnyFilter, parseProductFilterParams } from "@/lib/item-groups";
+import { getManagedProductCategories } from "@/lib/products/categoriesLoader";
+import { collectDistinctFinishValues } from "@/lib/products/finishes";
 import { InstructiveMessage } from "@/components/admin/InstructiveMessage";
 import { signPriceFileUrl, fileNameFromPath } from "@/lib/storage";
 import { ProductForm } from "./ProductForm";
@@ -15,18 +16,6 @@ import { ProductListItem, type ProductPriceProvenance } from "./ProductListItem"
 
 export const metadata = {
   title: "Products",
-};
-
-const CATEGORY_LABELS: Record<string, string> = {
-  locksets: "Locksets",
-  closers: "Closers",
-  hinges: "Hinges",
-  exit_devices: "Exit devices",
-  access_control: "Access control",
-  ironmongery: "Ironmongery",
-  signage: "Signage",
-  frames: "Frames",
-  other: "Other",
 };
 
 // Sensible cap so this stays a single server-rendered list without a
@@ -77,6 +66,26 @@ export default async function ProductsPage({
     else itemGroups = (data as ItemGroupRow[]) ?? [];
   } catch (err) {
     itemGroupsError = err instanceof Error ? err.message : "Unknown error reaching Supabase.";
+  }
+
+  const productCategories = await getManagedProductCategories(supabase);
+
+  // Distinct finish values for the product form's datalist type-aheads
+  // (founder feedback 2026-08-07). Deliberately a separate, unfiltered
+  // query over the whole table (not RESULT_LIMIT/search-scoped) so the
+  // type-ahead always reflects every finish value ever entered, not just
+  // what's currently on screen — see lib/products/finishes.ts.
+  let distinctFinishes = collectDistinctFinishValues([]);
+  try {
+    const { data } = await supabase
+      .from("products")
+      .select("specified_finish, supplied_finish, finish_code");
+    distinctFinishes = collectDistinctFinishValues(
+      (data as { specified_finish: string | null; supplied_finish: string | null; finish_code: string | null }[] | null) ?? []
+    );
+  } catch {
+    // Best-effort — an empty type-ahead is a reasonable fallback if this
+    // query fails while the main product list load below succeeds.
   }
 
   // Grade lives on item_groups, not products, so filtering by grade means
@@ -226,7 +235,12 @@ export default async function ProductsPage({
         <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">
           Add a product
         </h2>
-        <ProductForm suppliers={suppliers} itemGroups={itemGroups} />
+        <ProductForm
+          suppliers={suppliers}
+          itemGroups={itemGroups}
+          productCategories={productCategories}
+          distinctFinishes={distinctFinishes}
+        />
       </section>
 
       <section className="mt-10">
@@ -248,14 +262,22 @@ export default async function ProductsPage({
             />
           </div>
           <div>
-            <label className="block text-xs font-medium uppercase tracking-wide text-veridan-warm-gray" htmlFor="category">
-              Category
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-medium uppercase tracking-wide text-veridan-warm-gray" htmlFor="category">
+                Category
+              </label>
+              <Link
+                href="/admin/products/categories"
+                className="text-[11px] font-medium text-veridan-accent-text underline underline-offset-2 hover:text-veridan-ink"
+              >
+                Manage categories
+              </Link>
+            </div>
             <select id="category" name="category" defaultValue={category} className={`${inputClass} mt-1`}>
               <option value="">All categories</option>
-              {PRODUCT_CATEGORIES.map((c) => (
-                <option key={c} value={c}>
-                  {CATEGORY_LABELS[c] ?? c}
+              {productCategories.map((c) => (
+                <option key={c.name} value={c.name}>
+                  {c.label}
                 </option>
               ))}
             </select>
@@ -372,6 +394,8 @@ export default async function ProductsPage({
                 product={product}
                 suppliers={suppliers}
                 itemGroups={itemGroups}
+                productCategories={productCategories}
+                distinctFinishes={distinctFinishes}
                 priceProvenance={priceProvenanceById.get(product.id) ?? null}
               />
             ))}

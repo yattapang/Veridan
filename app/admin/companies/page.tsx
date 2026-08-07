@@ -1,19 +1,12 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { COMPANY_TYPES, type CompanyRow } from "@/lib/supabase/types";
+import type { CompanyRow } from "@/lib/supabase/types";
+import { getManagedCompanyTypes } from "@/lib/companies/typesLoader";
 import { InstructiveMessage } from "@/components/admin/InstructiveMessage";
 import { CompanyForm } from "./CompanyForm";
 
 export const metadata = {
   title: "Companies",
-};
-
-const TYPE_LABELS: Record<string, string> = {
-  architect: "Architect",
-  contractor: "Contractor",
-  owner: "Owner",
-  fm: "Facilities Management",
-  supplier_contact: "Supplier contact",
 };
 
 function firstParam(value: string | string[] | undefined): string {
@@ -44,6 +37,9 @@ export default async function CompaniesPage({
       </div>
     );
   }
+
+  const companyTypes = await getManagedCompanyTypes(supabase);
+  const typeLabelByName = new Map(companyTypes.map((t) => [t.name, t.label]));
 
   let query = supabase.from("companies").select("*").order("name");
   if (q) {
@@ -92,7 +88,7 @@ export default async function CompaniesPage({
         <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">
           Add a company
         </h2>
-        <CompanyForm />
+        <CompanyForm companyTypes={companyTypes} />
       </section>
 
       <section className="mt-10">
@@ -107,14 +103,22 @@ export default async function CompaniesPage({
             <input id="q" type="text" name="q" defaultValue={q} className={`${inputClass} mt-1`} />
           </div>
           <div>
-            <label className="block text-xs font-medium uppercase tracking-wide text-veridan-warm-gray" htmlFor="type">
-              Type
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-medium uppercase tracking-wide text-veridan-warm-gray" htmlFor="type">
+                Type
+              </label>
+              <Link
+                href="/admin/companies/types"
+                className="text-[11px] font-medium text-veridan-accent-text underline underline-offset-2 hover:text-veridan-ink"
+              >
+                Manage types
+              </Link>
+            </div>
             <select id="type" name="type" defaultValue={type} className={`${inputClass} mt-1`}>
               <option value="">All types</option>
-              {COMPANY_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {TYPE_LABELS[t] ?? t}
+              {companyTypes.map((t) => (
+                <option key={t.name} value={t.name}>
+                  {t.label}
                 </option>
               ))}
             </select>
@@ -162,7 +166,7 @@ export default async function CompaniesPage({
                   <div>
                     <p className="text-sm font-medium text-veridan-ink">{c.name}</p>
                     <p className="mt-1 text-xs text-veridan-warm-gray">
-                      {TYPE_LABELS[c.type] ?? c.type}
+                      {typeLabelByName.get(c.type) ?? c.type}
                       {" · "}
                       {c.status === "established" ? "Established" : "New"}
                       {" · "}
