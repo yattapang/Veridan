@@ -332,7 +332,13 @@ export function ArticleEditor({
           </div>
           {showPreview ? (
             <div
-              className="prose prose-sm min-h-[280px] max-w-none rounded-md border border-veridan-warm-gray-light bg-white px-4 py-3"
+              // `prose-veridan` is the real, hand-written article typography
+              // (app/globals.css) — the same class the published article page
+              // uses, so this preview matches what readers will actually see.
+              // (The bare `prose`/`prose-sm` names here were inert: they come
+              // from @tailwindcss/typography, which this project deliberately
+              // does not install.)
+              className="prose-veridan min-h-[280px] max-w-none rounded-md border border-veridan-warm-gray-light bg-white px-4 py-3 text-sm leading-relaxed text-veridan-ink"
               // Safe: renderMarkdownToSafeHtml escapes all source text and only
               // reintroduces a fixed, known-safe tag set (lib/articles/markdown.ts).
               dangerouslySetInnerHTML={{ __html: renderMarkdownToSafeHtml(body) || "<p><em>Nothing to preview yet.</em></p>" }}
