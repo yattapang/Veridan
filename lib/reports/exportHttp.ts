@@ -7,18 +7,21 @@
  */
 
 import { NextResponse } from "next/server";
-import { yearToDateRange, type ReportDateRange } from "./period";
+import { parseReportDateRange, type ReportDateRange } from "./period";
 
-/** Reads `from`/`to` (YYYY-MM-DD) off the request URL, falling back to year-to-date. */
-export function parseExportRange(request: Request): ReportDateRange {
+/**
+ * Reads `from`/`to` (YYYY-MM-DD) off the request URL, falling back to
+ * year-to-date when a value is absent.
+ *
+ * Returns `null` — never a silently repaired range — when a value is
+ * malformed or the pair is reversed, so the route can answer 400 rather
+ * than serve a file whose period is not the period the caller asked for.
+ * The strictness is also what keeps unvalidated query text out of the
+ * PostgREST filter strings lib/reports/load.ts builds from a range.
+ */
+export function parseExportRange(request: Request): ReportDateRange | null {
   const url = new URL(request.url);
-  const from = (url.searchParams.get("from") ?? "").trim();
-  const to = (url.searchParams.get("to") ?? "").trim();
-  const fallback = yearToDateRange();
-  return {
-    startIso: from || fallback.startIso,
-    endIso: to || fallback.endIso,
-  };
+  return parseReportDateRange(url.searchParams.get("from"), url.searchParams.get("to"));
 }
 
 /** A downloadable CSV response with the right headers and no caching. */
@@ -43,6 +46,17 @@ export function xlsxResponse(buffer: ArrayBuffer, filename: string): NextRespons
       "Cache-Control": "private, no-store",
     },
   });
+}
+
+/** A rejected `?from=&to=` pair. Built fresh per call — a NextResponse body may only be consumed once. */
+export function invalidRangeResponse(): NextResponse {
+  return NextResponse.json(
+    {
+      error:
+        "Invalid date range. `from` and `to` must be YYYY-MM-DD (zero-padded), and `from` must not be after `to`.",
+    },
+    { status: 400 },
+  );
 }
 
 export const NOT_AUTHENTICATED = NextResponse.json({ error: "Not authenticated." }, { status: 401 });

@@ -5,8 +5,81 @@ import {
   jamaicaToday,
   monthKeyFromDateOnly,
   monthKeysInRange,
+  parseReportDateRange,
+  shiftIsoDate,
   yearToDateRange,
 } from "./period";
+
+const FALLBACK = { startIso: "2026-01-01", endIso: "2026-08-07" };
+
+describe("parseReportDateRange (MINOR m-2)", () => {
+  it("accepts a well-formed range", () => {
+    expect(parseReportDateRange("2026-02-01", "2026-02-28", FALLBACK)).toEqual({
+      startIso: "2026-02-01",
+      endIso: "2026-02-28",
+    });
+  });
+
+  it("falls back per-end for a blank or missing value", () => {
+    expect(parseReportDateRange("2026-03-01", "", FALLBACK)).toEqual({
+      startIso: "2026-03-01",
+      endIso: FALLBACK.endIso,
+    });
+    expect(parseReportDateRange(null, undefined, FALLBACK)).toEqual(FALLBACK);
+    expect(parseReportDateRange("  ", "  ", FALLBACK)).toEqual(FALLBACK);
+  });
+
+  it("REJECTS an unpadded date rather than coercing it (these strings are compared as strings)", () => {
+    expect(parseReportDateRange("2026-1-5", "2026-02-28", FALLBACK)).toBeNull();
+    expect(parseReportDateRange("2026-01-01", "2026-2-8", FALLBACK)).toBeNull();
+  });
+
+  it("REJECTS a REVERSED range", () => {
+    expect(parseReportDateRange("2026-03-31", "2026-01-01", FALLBACK)).toBeNull();
+    // Equal ends are a legitimate one-day range, not a reversal.
+    expect(parseReportDateRange("2026-03-31", "2026-03-31", FALLBACK)).toEqual({
+      startIso: "2026-03-31",
+      endIso: "2026-03-31",
+    });
+  });
+
+  it("REJECTS a reversal that only appears once the fallback fills the other end", () => {
+    expect(parseReportDateRange("2027-01-01", "", FALLBACK)).toBeNull();
+    expect(parseReportDateRange("", "2025-01-01", FALLBACK)).toBeNull();
+  });
+
+  it("REJECTS anything that could restructure a PostgREST filter expression", () => {
+    for (const hostile of [
+      "2026-01-01,or(id.gt.0)",
+      "2026-01-01)",
+      "2026-01-01 or true",
+      "not-a-date",
+      "20260101",
+      "2026-01-01T00:00:00Z",
+    ]) {
+      expect(parseReportDateRange(hostile, "2026-12-31", FALLBACK)).toBeNull();
+      expect(parseReportDateRange("2026-01-01", hostile, FALLBACK)).toBeNull();
+    }
+  });
+
+  it("defaults to year-to-date when no fallback is supplied", () => {
+    const parsed = parseReportDateRange(null, null);
+    expect(parsed).toEqual(yearToDateRange());
+  });
+});
+
+describe("shiftIsoDate", () => {
+  it("shifts forward and back, staying zero-padded", () => {
+    expect(shiftIsoDate("2026-01-01", -1)).toBe("2025-12-31");
+    expect(shiftIsoDate("2026-12-31", 1)).toBe("2027-01-01");
+    expect(shiftIsoDate("2026-03-15", 0)).toBe("2026-03-15");
+  });
+
+  it("handles a leap day", () => {
+    expect(shiftIsoDate("2028-02-28", 1)).toBe("2028-02-29");
+    expect(shiftIsoDate("2028-03-01", -1)).toBe("2028-02-29");
+  });
+});
 
 describe("monthKeyFromDateOnly", () => {
   it("takes the YYYY-MM prefix with no timezone shift", () => {

@@ -83,8 +83,15 @@ export default async function ExpensesPage({
   const allExpenses = (expensesResult.data as unknown as ExpenseWithCategory[] | null) ?? [];
   const expenses = filterExpenses(allExpenses, { startIso, endIso, categoryId: categoryId || null, payment });
 
+  // A single row may carry BOTH an amount_jmd and an amount_usd (one bill,
+  // recorded in two currencies), in which case it appears in full in each
+  // tally below. The two are therefore NOT summable, and the tile labels say
+  // so — see the count of dual-currency rows rendered beneath them. The
+  // reports handle this correctly already (a JMD-present row is never
+  // re-derived from its USD sibling); this is a display-only clarification.
   const totalJmd = expenses.reduce((s, e) => s + (e.amount_jmd ?? 0), 0);
   const totalUsd = expenses.reduce((s, e) => s + (e.amount_usd ?? 0), 0);
+  const bothCurrenciesCount = expenses.filter((e) => e.amount_jmd != null && e.amount_usd != null).length;
   const unpaidCount = expenses.filter((e) => e.paid_date == null).length;
 
   return (
@@ -120,13 +127,18 @@ export default async function ExpensesPage({
 
       <div className="grid gap-4 sm:grid-cols-3">
         <div className="rounded-md bg-veridan-warm-gray-pale/60 px-4 py-3">
-          <p className="text-xs font-medium uppercase tracking-wide text-veridan-warm-gray">Recorded in JMD</p>
+          <p className="text-xs font-medium uppercase tracking-wide text-veridan-warm-gray">
+            JMD amounts entered
+          </p>
           <p className="mt-1 text-lg font-semibold text-veridan-ink">{formatJmd(totalJmd, 2)}</p>
+          <p className="text-xs text-veridan-warm-gray">Sum of the JMD field. Not a period total.</p>
         </div>
         <div className="rounded-md bg-veridan-warm-gray-pale/60 px-4 py-3">
-          <p className="text-xs font-medium uppercase tracking-wide text-veridan-warm-gray">Recorded in USD</p>
+          <p className="text-xs font-medium uppercase tracking-wide text-veridan-warm-gray">
+            USD amounts entered
+          </p>
           <p className="mt-1 text-lg font-semibold text-veridan-ink">{formatUsd(totalUsd)}</p>
-          <p className="text-xs text-veridan-warm-gray">Converted only on the income statement, at the rate it states.</p>
+          <p className="text-xs text-veridan-warm-gray">Sum of the USD field. Not a period total.</p>
         </div>
         <div className="rounded-md bg-veridan-warm-gray-pale/60 px-4 py-3">
           <p className="text-xs font-medium uppercase tracking-wide text-veridan-warm-gray">Unpaid</p>
@@ -138,6 +150,19 @@ export default async function ExpensesPage({
           </p>
         </div>
       </div>
+
+      <p className="mt-2 max-w-3xl text-xs text-veridan-warm-gray">
+        The two currency figures are <strong>two separate tallies of two separate fields</strong>, not two halves
+        of one total — <strong>do not add them</strong>.{" "}
+        {bothCurrenciesCount > 0
+          ? `${bothCurrenciesCount} row${bothCurrenciesCount === 1 ? " in" : "s in"} this range carr${
+              bothCurrenciesCount === 1 ? "ies" : "y"
+            } both a JMD and a USD amount and so appear${
+              bothCurrenciesCount === 1 ? "s" : ""
+            } in full in each. `
+          : ""}
+        The single, correctly converted period figure lives on the income statement, which states the rate it used.
+      </p>
 
       <section className="mt-8 rounded-md border border-veridan-warm-gray-light bg-white px-5 py-5">
         <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">

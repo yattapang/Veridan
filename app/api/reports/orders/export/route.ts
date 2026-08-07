@@ -8,7 +8,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
 import { buildCsvDocument } from "@/lib/reports/csv";
-import { csvResponse, NOT_AUTHENTICATED, parseExportRange, SUPABASE_NOT_CONFIGURED } from "@/lib/reports/exportHttp";
+import { csvResponse, invalidRangeResponse, NOT_AUTHENTICATED, parseExportRange, SUPABASE_NOT_CONFIGURED } from "@/lib/reports/exportHttp";
 import { loadOrdersRawData } from "@/lib/reports/load";
 import { ordersRawToCsvRows } from "@/lib/reports/serialize";
 import { NextResponse } from "next/server";
@@ -25,6 +25,7 @@ export async function GET(request: Request) {
   }
 
   const range = parseExportRange(request);
+  if (!range) return invalidRangeResponse();
   const { data, error } = await loadOrdersRawData(supabase, range);
   if (error || !data) {
     return NextResponse.json({ error: error ?? "Could not load report." }, { status: 500 });

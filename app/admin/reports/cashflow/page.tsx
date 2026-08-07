@@ -2,7 +2,8 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { InstructiveMessage } from "@/components/admin/InstructiveMessage";
 import { formatJmd, formatUsd } from "@/lib/quotes/format";
-import { yearToDateRange, type ReportDateRange } from "@/lib/reports/period";
+import { describeCurrentFxRate } from "@/lib/expenses/expense";
+import { parseReportDateRange, yearToDateRange } from "@/lib/reports/period";
 import {
   computeCashFlowByMonth,
   netCashMovementJmd,
@@ -37,13 +38,9 @@ export default async function CashFlowReportPage({
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const query = await searchParams;
-  const startParam = firstParam(query.start).trim();
-  const endParam = firstParam(query.end).trim();
-  const defaultRange = yearToDateRange();
-  const range: ReportDateRange = {
-    startIso: startParam || defaultRange.startIso,
-    endIso: endParam || defaultRange.endIso,
-  };
+  // A malformed or reversed range falls back to year-to-date rather than
+  // being passed through to the query layer.
+  const range = parseReportDateRange(firstParam(query.start), firstParam(query.end)) ?? yearToDateRange();
 
   let supabase;
   try {
@@ -73,7 +70,7 @@ export default async function CashFlowReportPage({
     );
   }
 
-  const { entries: outEntries, unconvertedUsd } = buildCashOutEntries(data);
+  const { entries: outEntries, unconvertedUsd, usedCurrentRateConversion } = buildCashOutEntries(data, range);
   const monthly = computeCashFlowByMonth(data.cashIn, range, outEntries);
   const totalIn = totalCashInJmd(monthly);
   const totalOut = totalCashOutJmd(monthly);
@@ -137,6 +134,21 @@ export default async function CashFlowReportPage({
         <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
           {formatUsd(unconvertedUsd)} of paid costs and expenses could not be converted to JMD (no FX rate
           available) and is excluded from the outflows above.
+        </div>
+      )}
+
+      {/* The same disclosure the income statement and the ledger carry.
+          Without it a HISTORICAL USD outflow silently changes value whenever
+          the founder edits the FX parameter, with nothing on the page saying
+          so. Gated on a current-rate conversion actually contributing here. */}
+      {usedCurrentRateConversion && (
+        <div className="mt-4 rounded-md border border-veridan-warm-gray-light bg-veridan-warm-gray-pale/50 px-4 py-3 text-xs text-veridan-warm-gray">
+          <strong className="text-veridan-ink">FX note.</strong> Some outflows above were recorded in USD only. An
+          operating expense is not linked to an order, so there is no quote-locked rate to use — those are
+          converted here at the <strong>current</strong> business-parameter rate ({describeCurrentFxRate(data.fx)}),
+          read just now. A historical USD outflow&apos;s JMD figure therefore changes if this page is reloaded
+          after the rate parameter is updated. Record the JMD amount you were actually billed if you need a figure
+          that never moves. USD cost of sales is unaffected: it converts at its own order&apos;s frozen quote rate.
         </div>
       )}
 

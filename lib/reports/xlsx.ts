@@ -22,11 +22,18 @@ import ExcelJS from "exceljs";
 import type { MarginAuditReport } from "./marginAudit";
 import { VARIANCE_CATEGORY_LABELS } from "./marginAudit";
 import { ORDER_STATUS_LABELS } from "../orders/format";
+import {
+  REPORT_BASIS_DESCRIPTIONS,
+  REPORT_BASIS_LABELS,
+  REPORT_BASIS_SUFFIX,
+  type ReportBasis,
+} from "./basis";
 import type { ReportDateRange } from "./period";
 import {
+  TRANSACTION_DIRECTION,
   TRANSACTION_FX_BASIS_LABELS,
   TRANSACTION_TYPE_LABELS,
-  TRANSACTION_TYPES,
+  transactionTypesForBasis,
   type TransactionLedger,
 } from "./transactions";
 
@@ -171,6 +178,9 @@ export async function buildTransactionLedgerWorkbook(
   ledger: TransactionLedger,
   range: ReportDateRange,
 ): Promise<ArrayBuffer> {
+  const basis: ReportBasis = ledger.basis;
+  const suffix = REPORT_BASIS_SUFFIX[basis];
+
   const wb = new ExcelJS.Workbook();
   wb.creator = "Veridan Limited";
   wb.created = new Date();
@@ -178,7 +188,7 @@ export async function buildTransactionLedgerWorkbook(
   // ---- Sheet 1: Transactions ----
   const sheet = wb.addWorksheet("Transactions");
   sheet.columns = [
-    { header: "Date", key: "date", width: 12 },
+    { header: `Date (${suffix})`, key: "date", width: 16 },
     { header: "Type", key: "type", width: 18 },
     { header: "Reference", key: "reference", width: 24 },
     { header: "Party", key: "party", width: 26 },
@@ -186,7 +196,8 @@ export async function buildTransactionLedgerWorkbook(
     { header: "Description", key: "description", width: 44 },
     { header: "Amount JMD (as recorded)", key: "amountJmd", width: 22 },
     { header: "Amount USD (as recorded)", key: "amountUsd", width: 22 },
-    { header: "Amount JMD (for totalling)", key: "resolvedJmd", width: 23 },
+    { header: `Amount JMD (for totalling, ${suffix}, net of GCT)`, key: "resolvedJmd", width: 30 },
+    { header: "GCT (JMD, not revenue)", key: "gctJmd", width: 20 },
     { header: "FX basis", key: "fxBasis", width: 38 },
     { header: "Date incurred", key: "incurred", width: 14 },
     { header: "Date paid", key: "paid", width: 12 },
@@ -206,6 +217,7 @@ export async function buildTransactionLedgerWorkbook(
       amountJmd: round(r.amountJmd, 2),
       amountUsd: round(r.amountUsd, 2),
       resolvedJmd: round(r.resolvedJmd, 2),
+      gctJmd: round(r.gctJmd, 2),
       fxBasis: TRANSACTION_FX_BASIS_LABELS[r.fxBasis],
       incurred: r.incurredDateIso ?? "",
       paid: r.paidDateIso ?? "",
@@ -214,6 +226,7 @@ export async function buildTransactionLedgerWorkbook(
     row.getCell("amountJmd").numFmt = JMD_FMT;
     row.getCell("amountUsd").numFmt = USD_FMT;
     row.getCell("resolvedJmd").numFmt = JMD_FMT;
+    row.getCell("gctJmd").numFmt = JMD_FMT;
     // An unresolved row has no figure in the totals; flagging it in place
     // means the accountant sees the gap on the row itself rather than only
     // in a footnote they may not scroll to.
@@ -227,46 +240,67 @@ export async function buildTransactionLedgerWorkbook(
   }
 
   // ---- Sheet 2: By type ----
+  // Each subtotal states, in its own row, how many of that type's rows could
+  // NOT be resolved to JMD and are therefore missing from it. Folding an
+  // unresolved row in as zero with no flag is how a per-type subtotal
+  // quietly under-reports.
   const summary = wb.addWorksheet("By type");
   summary.columns = [
     { header: "Type", key: "type", width: 22 },
     { header: "Direction", key: "direction", width: 12 },
     { header: "Rows", key: "count", width: 8 },
-    { header: "Total (JMD)", key: "total", width: 18 },
+    { header: `Total (JMD, ${suffix})`, key: "total", width: 22 },
+    { header: "Rows excluded (no FX rate)", key: "unresolvedCount", width: 24 },
+    { header: "…their USD face value", key: "unresolvedUsd", width: 22 },
   ];
   summary.getRow(1).font = { bold: true };
-  for (const type of TRANSACTION_TYPES) {
+  for (const type of transactionTypesForBasis(basis)) {
     const rowsOfType = ledger.rows.filter((r) => r.type === type);
-    const total = rowsOfType.reduce((s, r) => s + (r.resolvedJmd ?? 0), 0);
+    const resolved = rowsOfType.filter((r) => r.resolvedJmd != null);
+    const unresolved = rowsOfType.filter((r) => r.resolvedJmd == null);
+    const total = resolved.reduce((s, r) => s + (r.resolvedJmd ?? 0), 0);
+    const unresolvedUsd = unresolved.reduce((s, r) => s + (r.amountUsd ?? 0), 0);
     const row = summary.addRow({
       type: TRANSACTION_TYPE_LABELS[type],
-      direction: type === "customer_payment" ? "In" : "Out",
+      direction: TRANSACTION_DIRECTION[type] === 1 ? "In" : "Out",
       count: rowsOfType.length,
       total: round(total, 2),
+      unresolvedCount: unresolved.length,
+      unresolvedUsd: unresolved.length > 0 ? round(unresolvedUsd, 2) : null,
     });
     row.getCell("total").numFmt = JMD_FMT;
+    row.getCell("unresolvedUsd").numFmt = USD_FMT;
+    if (unresolved.length > 0) {
+      row.getCell("unresolvedCount").font = { bold: true, color: { argb: "FFB91C1C" } };
+      row.getCell("unresolvedUsd").font = { bold: true, color: { argb: "FFB91C1C" } };
+    }
   }
   summary.addRow({});
   const totalsRows: [string, string, number][] = [
-    ["Money in", "In", ledger.totalInJmd],
-    ["Money out", "Out", ledger.totalOutJmd],
-    ["Net", "", ledger.netJmd],
+    [`Money in (${suffix})`, "In", ledger.totalInJmd],
+    [`Money out (${suffix})`, "Out", ledger.totalOutJmd],
+    [`Net (${suffix})`, "", ledger.netJmd],
   ];
   for (const [label, direction, value] of totalsRows) {
     const row = summary.addRow({ type: label, direction, total: round(value, 2) });
     row.font = { bold: true };
     row.getCell("total").numFmt = JMD_FMT;
   }
+  const gctRow = summary.addRow({
+    type: "GCT collected — memo, not revenue",
+    total: round(ledger.gctCollectedJmd, 2),
+  });
+  gctRow.getCell("total").numFmt = JMD_FMT;
   if (ledger.unresolvedRowCount > 0) {
     summary.addRow({});
     const row = summary.addRow({
       type: "Excluded from totals (no FX rate)",
       count: ledger.unresolvedRowCount,
       total: null,
+      unresolvedUsd: round(ledger.unresolvedUsd, 2),
     });
     row.font = { color: { argb: "FFB91C1C" } };
-    const usdRow = summary.addRow({ type: "…their USD face value", total: round(ledger.unresolvedUsd, 2) });
-    usdRow.getCell("total").numFmt = USD_FMT;
+    row.getCell("unresolvedUsd").numFmt = USD_FMT;
   }
 
   // ---- Sheet 3: About ----
@@ -277,29 +311,42 @@ export async function buildTransactionLedgerWorkbook(
   ];
   about.getRow(1).font = { bold: true };
   const aboutRows: [string, string][] = [
-    ["Report", "Veridan — Transaction detail (general ledger)"],
+    ["Report", `Veridan — Transaction detail (general ledger, ${REPORT_BASIS_LABELS[basis]} basis)`],
     ["Period from", range.startIso],
     ["Period to", range.endIso],
+    ["Reporting basis", `${REPORT_BASIS_LABELS[basis]} — ${REPORT_BASIS_DESCRIPTIONS[basis]}`],
     ["Generated", new Date().toISOString()],
     [
       "What this is",
-      "Every financial transaction Veridan recorded in the period, in one chronological listing: customer payments received, cost of sales, and operating expenses. It is not a double-entry journal — there are no debits, credits, or a trial balance.",
+      basis === "accrual"
+        ? "Every financial transaction Veridan recorded in the period on the ACCRUAL basis: invoices issued, cost of sales incurred, and operating expenses incurred. Payments received are deliberately NOT listed — on this basis the invoice is the revenue event, and listing the payment too would double-count it. It is not a double-entry journal: there are no debits, credits, or a trial balance."
+        : "Every financial transaction Veridan recorded in the period on the CASH basis: customer payments received, and cost of sales and operating expenses actually paid. Issued invoices are deliberately NOT listed — on this basis the payment is the revenue event. Anything with no payment date recorded is excluded entirely. It is not a double-entry journal: there are no debits, credits, or a trial balance.",
+    ],
+    [
+      "Reconciliation",
+      "This file ties out to the income statement for the same period and basis: Money in equals its Revenue line, Money out equals Cost of sales plus Operating expenses, and Net equals Net profit. Rows with no available FX rate are excluded from both, and are counted separately on the 'By type' sheet rather than folded in as zero.",
     ],
     [
       "Date column",
-      "Each row's primary date: a customer payment's payment date, and a cost's or expense's incurred date. Fixed rather than basis-dependent, because this listing is the raw record both the accrual and cash statements are derived from.",
+      basis === "accrual"
+        ? "The accrual date: an invoice's issue date, and a cost's or expense's incurred date."
+        : "The cash date: a payment's payment date, and a cost's or expense's paid date.",
     ],
     [
       "Date incurred / Date paid",
-      "Both dates travel on every row so this file can be re-cut on either basis. A blank 'Date paid' means the item is still unpaid and is therefore absent from every cash-basis figure elsewhere.",
+      "Both dates travel on every row so the other side of each item is visible without re-running the report. A blank 'Date paid' means the item is still unpaid and is therefore absent from every cash-basis figure.",
     ],
     [
       "Amount as recorded",
-      "Exactly the JMD and/or USD amount that was entered. Never derived, never overwritten.",
+      "Exactly the JMD and/or USD amount that was entered. Never derived, never overwritten. On a revenue row this is the GROSS figure — the amount billed or received, GCT included.",
     ],
     [
       "Amount for totalling",
-      "A single-currency JMD figure so the column can be summed. The 'FX basis' column states per row how it was arrived at.",
+      "A single-currency JMD figure so the column can be summed. On a revenue row it is NET of GCT, which is what the income statement's Revenue line sums. The 'FX basis' column states per row how it was arrived at.",
+    ],
+    [
+      "GCT",
+      "The tax portion of a revenue row: as-recorded = for-totalling + GCT. GCT is collected on the government's behalf and is a liability, never revenue — so it is reported here as a memo and excluded from every total.",
     ],
     ["FX basis — " + TRANSACTION_FX_BASIS_LABELS.native, "The row was recorded in JMD; no conversion was applied."],
     [

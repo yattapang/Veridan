@@ -30,6 +30,19 @@
  * GROSS profit by order; net profit exists only at period level. This is the
  * same reasoning that leaves the margin audit untouched by the expenses
  * work.
+ *
+ * GCT IS NEVER REVENUE, ON EITHER BASIS. `invoices.amount_jmd` is
+ * subtotal + GCT — the amount the client owes. GCT is collected on the
+ * government's behalf and is a LIABILITY, not income. So:
+ *   · accrual revenue = `invoices.subtotal_jmd` (GCT-exclusive by
+ *     construction, see supabase/migrations/20260718000002_invoicing.sql);
+ *   · cash revenue    = each payment PRO-RATED by its invoice's
+ *     subtotal/amount ratio, because a part payment settles the GCT and the
+ *     net in the same proportion the invoice was raised in.
+ * The GCT actually collected is reported as a MEMO line beneath Net Profit —
+ * visible, reconcilable against a GCT return, and unmistakably not revenue.
+ * This is latent today (`gct_enabled` is false, so every ratio is 1.0) and
+ * becomes load-bearing the moment GCT is switched on.
  */
 
 import { monthKeyFromDateOnly, monthKeysInRange, isWithinReportRange, type ReportDateRange } from "./period";
@@ -53,12 +66,57 @@ import type { ActualCostCategory } from "@/lib/supabase/types";
 
 /** An invoice that has been ISSUED (non-void) — the ACCRUAL revenue event. */
 export interface IssuedInvoiceInput {
-  amountJmd: number;
+  /** `invoices.amount_jmd` — subtotal + GCT, the amount the client owes. NOT revenue. */
+  grossAmountJmd: number;
+  /** `invoices.subtotal_jmd` — GCT-EXCLUSIVE. THIS is the revenue figure. */
+  revenueJmd: number;
+  /** `invoices.gct_amount_jmd` — collected for the government. A liability; memo line only. */
+  gctJmd: number;
   /** `YYYY-MM-DD`, Jamaica-local, derived from `invoices.issued_at`. */
   issuedDateIso: string;
   orderId: string | null;
   quoteRef: string;
   invoiceNumber: string;
+}
+
+/**
+ * A customer payment carrying its GCT split — the CASH revenue event.
+ *
+ * `amountJmd` (inherited) is the payment exactly as recorded: the full sum
+ * that hit the bank, GCT included. `revenueJmd` is the GCT-exclusive share
+ * that belongs on the Revenue line, and `gctJmd` is the remainder. The
+ * cash-flow statement wants the former; the income statement wants the
+ * latter — which is why both travel rather than one being derived downstream.
+ */
+export interface PaymentRevenueInput extends PnlPaymentInput {
+  /** The GCT-exclusive share of this payment. */
+  revenueJmd: number;
+  /** `amountJmd` − `revenueJmd`. */
+  gctJmd: number;
+}
+
+/**
+ * The GCT-exclusive fraction of an invoice's gross amount, for pro-rating a
+ * payment against it.
+ *
+ * Returns 1 (treat the whole payment as revenue) whenever the split cannot
+ * be established: no recorded subtotal, or a zero/absent/non-finite gross.
+ * Over-stating revenue is the honest failure mode here — the alternative,
+ * inventing a GCT rate, would fabricate a tax liability.
+ */
+export function invoiceRevenueShare(
+  subtotalJmd: number | null | undefined,
+  grossAmountJmd: number | null | undefined,
+): number {
+  if (subtotalJmd == null || !Number.isFinite(subtotalJmd)) return 1;
+  if (grossAmountJmd == null || !Number.isFinite(grossAmountJmd) || grossAmountJmd === 0) return 1;
+  const share = subtotalJmd / grossAmountJmd;
+  return Number.isFinite(share) ? share : 1;
+}
+
+/** Rounds to 2dp, so a pro-rated share never leaves float dust in a currency figure. */
+export function roundJmd(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
 /** An actual cost, carrying BOTH of its dates so either basis can select it. */
@@ -95,20 +153,52 @@ export interface OperatingExpenseInput {
  * invoice is treated as a payment — no payment record is created, implied,
  * or double-counted, because on the accrual basis the `invoice_payments`
  * rows are not consulted at all.
+ *
+ * `amountJmd` on the rows this returns is the GCT-EXCLUSIVE revenue figure
+ * on both bases (see module header). This function is the single place that
+ * translation happens, so no downstream sum can accidentally pick up the
+ * gross.
  */
 export function revenueRowsForBasis(
   basis: ReportBasis,
   issuedInvoices: IssuedInvoiceInput[],
-  payments: PnlPaymentInput[],
+  payments: PaymentRevenueInput[],
 ): PnlPaymentInput[] {
-  if (basis === "cash") return payments;
+  if (basis === "cash") {
+    return payments.map((p) => ({
+      amountJmd: p.revenueJmd,
+      paidAtIso: p.paidAtIso,
+      orderId: p.orderId,
+      quoteRef: p.quoteRef,
+      invoiceNumber: p.invoiceNumber,
+    }));
+  }
   return issuedInvoices.map((inv) => ({
-    amountJmd: inv.amountJmd,
+    amountJmd: inv.revenueJmd,
     paidAtIso: inv.issuedDateIso,
     orderId: inv.orderId,
     quoteRef: inv.quoteRef,
     invoiceNumber: inv.invoiceNumber,
   }));
+}
+
+/**
+ * The GCT collected in `range` on the selected basis — the memo line beneath
+ * Net Profit. Accrual counts GCT billed on invoices issued in the period;
+ * cash counts GCT actually received with the payments. Never added to any
+ * revenue, profit or margin figure.
+ */
+export function gctCollectedJmd(
+  basis: ReportBasis,
+  issuedInvoices: IssuedInvoiceInput[],
+  payments: PaymentRevenueInput[],
+  range: ReportDateRange,
+): number {
+  const total =
+    basis === "cash"
+      ? payments.reduce((s, p) => (isWithinReportRange(p.paidAtIso, range) ? s + p.gctJmd : s), 0)
+      : issuedInvoices.reduce((s, inv) => (isWithinReportRange(inv.issuedDateIso, range) ? s + inv.gctJmd : s), 0);
+  return roundJmd(total);
 }
 
 /**
@@ -125,6 +215,7 @@ export function costRowsForBasis(basis: ReportBasis, costs: CostOfSalesInput[]):
       amountJmd: c.amountJmd,
       incurredDateIso: c.incurredDateIso,
       category: c.category,
+      quoteRef: c.quoteRef,
     }));
   }
   const rows: PnlCostInput[] = [];
@@ -136,6 +227,7 @@ export function costRowsForBasis(basis: ReportBasis, costs: CostOfSalesInput[]):
       amountJmd: c.amountJmd,
       incurredDateIso: c.paidDateIso,
       category: c.category,
+      quoteRef: c.quoteRef,
     });
   }
   return rows;
@@ -278,6 +370,14 @@ export interface IncomeStatement {
   unconvertedCostOfSalesUsd: number;
   /** USD operating expenses that had no current rate and are excluded from every JMD figure above. */
   unconvertedOperatingExpensesUsd: number;
+  /**
+   * MEMO ONLY — GCT collected in the period on this basis. Not revenue, not
+   * income, and not part of any figure above: it is money held on the
+   * government's behalf. Rendered beneath Net Profit so it can be
+   * reconciled against a GCT return without ever being mistaken for a
+   * trading figure.
+   */
+  gctCollectedJmd: number;
   /** True when any USD-only operating expense WAS converted, so the UI must disclose the live-rate caveat. */
   usedCurrentRateConversion: boolean;
 }
@@ -310,7 +410,7 @@ function columnFrom(
 
 export interface IncomeStatementInputs {
   issuedInvoices: IssuedInvoiceInput[];
-  payments: PnlPaymentInput[];
+  payments: PaymentRevenueInput[];
   costs: CostOfSalesInput[];
   expenses: OperatingExpenseInput[];
   rateByOrderId: OrderRateLookup;
@@ -356,6 +456,7 @@ export function buildIncomeStatement(
     grossProfitByOrder: computePnlByOrder(revenueRows, costRows, inputs.rateByOrderId, range),
     unconvertedCostOfSalesUsd: pnlMonths.reduce((s, m) => s + m.unconvertedCostUsd, 0),
     unconvertedOperatingExpensesUsd: opexMonths.reduce((s, m) => s + m.unconvertedUsd, 0),
+    gctCollectedJmd: gctCollectedJmd(basis, inputs.issuedInvoices, inputs.payments, range),
     usedCurrentRateConversion: inputs.expenses.some((e) => usesCurrentRate(e, basis, range)),
   };
 }

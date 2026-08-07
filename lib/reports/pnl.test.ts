@@ -27,6 +27,7 @@ describe("costAmountJmd", () => {
       amountJmd: 5000,
       incurredDateIso: "2026-03-01",
       category: "freight",
+      quoteRef: "VQ-COST",
     };
     expect(costAmountJmd(cost, { o1: RATE })).toBe(5000);
   });
@@ -38,6 +39,7 @@ describe("costAmountJmd", () => {
       amountJmd: null,
       incurredDateIso: "2026-03-01",
       category: "freight",
+      quoteRef: "VQ-COST",
     };
     expect(costAmountJmd(cost, { o1: RATE })).toBeCloseTo(16686, 2);
   });
@@ -49,6 +51,7 @@ describe("costAmountJmd", () => {
       amountJmd: null,
       incurredDateIso: "2026-03-01",
       category: "freight",
+      quoteRef: "VQ-COST",
     };
     expect(costAmountJmd(cost, { o1: RATE })).toBeNull();
   });
@@ -72,7 +75,7 @@ describe("computePnlByMonth", () => {
       { amountJmd: 50000, paidAtIso: "2026-03-20", orderId: "o1", quoteRef: "VQ-2026-001", invoiceNumber: "VI-2026-002" },
     ];
     const costs: PnlCostInput[] = [
-      { orderId: "o1", amountUsd: null, amountJmd: 60000, incurredDateIso: "2026-03-10", category: "hardware" },
+      { orderId: "o1", amountUsd: null, amountJmd: 60000, incurredDateIso: "2026-03-10", category: "hardware", quoteRef: "VQ-COST" },
     ];
     const rows = computePnlByMonth(payments, costs, {}, RANGE);
     const march = rows.find((r) => r.monthKey === "2026-03")!;
@@ -84,8 +87,8 @@ describe("computePnlByMonth", () => {
 
   it("handles multi-currency actuals within the same month, converting USD-only rows", () => {
     const costs: PnlCostInput[] = [
-      { orderId: "o1", amountUsd: null, amountJmd: 10000, incurredDateIso: "2026-05-01", category: "hardware" },
-      { orderId: "o1", amountUsd: 100, amountJmd: null, incurredDateIso: "2026-05-15", category: "freight" },
+      { orderId: "o1", amountUsd: null, amountJmd: 10000, incurredDateIso: "2026-05-01", category: "hardware", quoteRef: "VQ-COST" },
+      { orderId: "o1", amountUsd: 100, amountJmd: null, incurredDateIso: "2026-05-15", category: "freight", quoteRef: "VQ-COST" },
     ];
     const rows = computePnlByMonth([], costs, { o1: RATE }, RANGE);
     const may = rows.find((r) => r.monthKey === "2026-05")!;
@@ -95,7 +98,7 @@ describe("computePnlByMonth", () => {
 
   it("tracks unconverted USD-only cost separately when the order's rate is unknown, rather than silently dropping it", () => {
     const costs: PnlCostInput[] = [
-      { orderId: "unknown", amountUsd: 200, amountJmd: null, incurredDateIso: "2026-06-01", category: "duty" },
+      { orderId: "unknown", amountUsd: 200, amountJmd: null, incurredDateIso: "2026-06-01", category: "duty", quoteRef: "VQ-COST" },
     ];
     const rows = computePnlByMonth([], costs, {}, RANGE);
     const june = rows.find((r) => r.monthKey === "2026-06")!;
@@ -124,10 +127,10 @@ describe("computePnlByMonth", () => {
 
   it("breaks JMD cost down by category within a month, and across different months", () => {
     const costs: PnlCostInput[] = [
-      { orderId: "o1", amountUsd: null, amountJmd: 10000, incurredDateIso: "2026-03-01", category: "hardware" },
-      { orderId: "o1", amountUsd: null, amountJmd: 4000, incurredDateIso: "2026-03-15", category: "freight" },
-      { orderId: "o1", amountUsd: null, amountJmd: 2500, incurredDateIso: "2026-03-20", category: "hardware" },
-      { orderId: "o1", amountUsd: null, amountJmd: 7000, incurredDateIso: "2026-04-01", category: "duty" },
+      { orderId: "o1", amountUsd: null, amountJmd: 10000, incurredDateIso: "2026-03-01", category: "hardware", quoteRef: "VQ-COST" },
+      { orderId: "o1", amountUsd: null, amountJmd: 4000, incurredDateIso: "2026-03-15", category: "freight", quoteRef: "VQ-COST" },
+      { orderId: "o1", amountUsd: null, amountJmd: 2500, incurredDateIso: "2026-03-20", category: "hardware", quoteRef: "VQ-COST" },
+      { orderId: "o1", amountUsd: null, amountJmd: 7000, incurredDateIso: "2026-04-01", category: "duty", quoteRef: "VQ-COST" },
     ];
     const rows = computePnlByMonth([], costs, {}, RANGE);
     const march = rows.find((r) => r.monthKey === "2026-03")!;
@@ -139,8 +142,8 @@ describe("computePnlByMonth", () => {
 
   it("combines a USD-only row with a JMD row in the same category, converting the USD side", () => {
     const costs: PnlCostInput[] = [
-      { orderId: "o1", amountUsd: null, amountJmd: 10000, incurredDateIso: "2026-05-01", category: "insurance" },
-      { orderId: "o1", amountUsd: 100, amountJmd: null, incurredDateIso: "2026-05-15", category: "insurance" },
+      { orderId: "o1", amountUsd: null, amountJmd: 10000, incurredDateIso: "2026-05-01", category: "insurance", quoteRef: "VQ-COST" },
+      { orderId: "o1", amountUsd: 100, amountJmd: null, incurredDateIso: "2026-05-15", category: "insurance", quoteRef: "VQ-COST" },
     ];
     const rows = computePnlByMonth([], costs, { o1: RATE }, RANGE);
     const may = rows.find((r) => r.monthKey === "2026-05")!;
@@ -150,9 +153,9 @@ describe("computePnlByMonth", () => {
 
   it("surfaces an unconvertible USD-only category cost separately rather than dropping it", () => {
     const costs: PnlCostInput[] = [
-      { orderId: "o1", amountUsd: null, amountJmd: 5000, incurredDateIso: "2026-06-01", category: "brokerage" },
-      { orderId: "unknown-order", amountUsd: 300, amountJmd: null, incurredDateIso: "2026-06-10", category: "brokerage" },
-      { orderId: "unknown-order", amountUsd: 50, amountJmd: null, incurredDateIso: "2026-06-12", category: "duty" },
+      { orderId: "o1", amountUsd: null, amountJmd: 5000, incurredDateIso: "2026-06-01", category: "brokerage", quoteRef: "VQ-COST" },
+      { orderId: "unknown-order", amountUsd: 300, amountJmd: null, incurredDateIso: "2026-06-10", category: "brokerage", quoteRef: "VQ-COST" },
+      { orderId: "unknown-order", amountUsd: 50, amountJmd: null, incurredDateIso: "2026-06-12", category: "duty", quoteRef: "VQ-COST" },
     ];
     const rows = computePnlByMonth([], costs, {}, RANGE);
     const june = rows.find((r) => r.monthKey === "2026-06")!;
@@ -175,11 +178,11 @@ describe("computePnlByMonth", () => {
 
   it("guarantees the sum of category subtotals equals costJmd for every month (grand-total consistency)", () => {
     const costs: PnlCostInput[] = [
-      { orderId: "o1", amountUsd: null, amountJmd: 10000, incurredDateIso: "2026-07-01", category: "hardware" },
-      { orderId: "o1", amountUsd: 100, amountJmd: null, incurredDateIso: "2026-07-05", category: "freight" },
-      { orderId: "o1", amountUsd: null, amountJmd: 3000, incurredDateIso: "2026-07-10", category: "other" },
+      { orderId: "o1", amountUsd: null, amountJmd: 10000, incurredDateIso: "2026-07-01", category: "hardware", quoteRef: "VQ-COST" },
+      { orderId: "o1", amountUsd: 100, amountJmd: null, incurredDateIso: "2026-07-05", category: "freight", quoteRef: "VQ-COST" },
+      { orderId: "o1", amountUsd: null, amountJmd: 3000, incurredDateIso: "2026-07-10", category: "other", quoteRef: "VQ-COST" },
       // unconvertible — must NOT be counted in costJmd or byCategory.
-      { orderId: "unknown", amountUsd: 999, amountJmd: null, incurredDateIso: "2026-07-15", category: "delivery" },
+      { orderId: "unknown", amountUsd: 999, amountJmd: null, incurredDateIso: "2026-07-15", category: "delivery", quoteRef: "VQ-COST" },
     ];
     const rows = computePnlByMonth([], costs, { o1: RATE }, RANGE);
     for (const row of rows) {
@@ -202,8 +205,8 @@ describe("computePnlByOrder", () => {
       { amountJmd: 99999, paidAtIso: "2026-02-01", orderId: null, quoteRef: "VQ-C", invoiceNumber: "VI-3" },
     ];
     const costs: PnlCostInput[] = [
-      { orderId: "o1", amountUsd: null, amountJmd: 10000, incurredDateIso: "2026-02-05", category: "hardware" },
-      { orderId: "o2", amountUsd: 100, amountJmd: null, incurredDateIso: "2026-02-05", category: "freight" },
+      { orderId: "o1", amountUsd: null, amountJmd: 10000, incurredDateIso: "2026-02-05", category: "hardware", quoteRef: "VQ-COST" },
+      { orderId: "o2", amountUsd: 100, amountJmd: null, incurredDateIso: "2026-02-05", category: "freight", quoteRef: "VQ-COST" },
     ];
     const rows = computePnlByOrder(payments, costs, { o2: RATE }, RANGE);
 
@@ -233,9 +236,9 @@ describe("computePnlByOrder", () => {
       { amountJmd: 200000, paidAtIso: "2026-02-01", orderId: "o1", quoteRef: "VQ-A", invoiceNumber: "VI-1" },
     ];
     const costs: PnlCostInput[] = [
-      { orderId: "o1", amountUsd: null, amountJmd: 10000, incurredDateIso: "2026-02-05", category: "hardware" },
-      { orderId: "o1", amountUsd: 100, amountJmd: null, incurredDateIso: "2026-02-06", category: "hardware" },
-      { orderId: "o1", amountUsd: null, amountJmd: 2000, incurredDateIso: "2026-02-07", category: "port_handling" },
+      { orderId: "o1", amountUsd: null, amountJmd: 10000, incurredDateIso: "2026-02-05", category: "hardware", quoteRef: "VQ-COST" },
+      { orderId: "o1", amountUsd: 100, amountJmd: null, incurredDateIso: "2026-02-06", category: "hardware", quoteRef: "VQ-COST" },
+      { orderId: "o1", amountUsd: null, amountJmd: 2000, incurredDateIso: "2026-02-07", category: "port_handling", quoteRef: "VQ-COST" },
     ];
     const rows = computePnlByOrder(payments, costs, { o1: RATE }, RANGE);
     const order = rows[0];
@@ -249,10 +252,10 @@ describe("computePnlByOrder", () => {
       { amountJmd: 50000, paidAtIso: "2026-02-01", orderId: "o1", quoteRef: "VQ-A", invoiceNumber: "VI-1" },
     ];
     const costs: PnlCostInput[] = [
-      { orderId: "o1", amountUsd: null, amountJmd: 5000, incurredDateIso: "2026-02-05", category: "duty" },
+      { orderId: "o1", amountUsd: null, amountJmd: 5000, incurredDateIso: "2026-02-05", category: "duty", quoteRef: "VQ-COST" },
       // o1 has no rate registered below, so this USD-only row is unconvertible.
-      { orderId: "o1", amountUsd: 40, amountJmd: null, incurredDateIso: "2026-02-06", category: "duty" },
-      { orderId: "o1", amountUsd: 15, amountJmd: null, incurredDateIso: "2026-02-07", category: "other" },
+      { orderId: "o1", amountUsd: 40, amountJmd: null, incurredDateIso: "2026-02-06", category: "duty", quoteRef: "VQ-COST" },
+      { orderId: "o1", amountUsd: 15, amountJmd: null, incurredDateIso: "2026-02-07", category: "other", quoteRef: "VQ-COST" },
     ];
     const rows = computePnlByOrder(payments, costs, {}, RANGE);
     const order = rows[0];
@@ -261,6 +264,114 @@ describe("computePnlByOrder", () => {
     expect(order.unconvertedUsdByCategory).toEqual({ duty: 40, other: 15 });
     expect(order.unconvertedCostUsd).toBe(55);
     expect(sumByCategory(order)).toBeCloseTo(order.costJmd, 6);
+  });
+});
+
+describe("computePnlByOrder — cost-only orders (MAJOR M-2)", () => {
+  it("gives an order with in-range costs and NO in-range revenue its own row", () => {
+    // The invoice for VQ-LATE was issued in a different period, so no revenue
+    // row for o9 falls inside `range`. Its costs are real and in range.
+    const costs: PnlCostInput[] = [
+      {
+        orderId: "o9",
+        amountUsd: null,
+        amountJmd: 75_000,
+        incurredDateIso: "2026-02-05",
+        category: "freight",
+        quoteRef: "VQ-LATE",
+      },
+    ];
+    const rows = computePnlByOrder([], costs, {}, RANGE);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      orderId: "o9",
+      quoteRef: "VQ-LATE",
+      revenueJmd: 0,
+      costJmd: 75_000,
+      grossProfitJmd: -75_000,
+      // A margin on zero revenue is undefined, not -100%.
+      marginPct: null,
+    });
+  });
+
+  it("the per-order cost column sums to the period's total cost of sales", () => {
+    // One order with revenue in range, one with costs only. Before the fix
+    // the second vanished and this equality failed.
+    const payments: PnlPaymentInput[] = [
+      { amountJmd: 500_000, paidAtIso: "2026-02-01", orderId: "o1", quoteRef: "VQ-A", invoiceNumber: "VI-1" },
+    ];
+    const costs: PnlCostInput[] = [
+      {
+        orderId: "o1",
+        amountUsd: null,
+        amountJmd: 120_000,
+        incurredDateIso: "2026-02-05",
+        category: "hardware",
+        quoteRef: "VQ-A",
+      },
+      {
+        orderId: "o2",
+        amountUsd: null,
+        amountJmd: 80_000,
+        incurredDateIso: "2026-02-06",
+        category: "freight",
+        quoteRef: "VQ-B",
+      },
+    ];
+
+    const byOrder = computePnlByOrder(payments, costs, {}, RANGE);
+    const periodCostJmd = computePnlByMonth(payments, costs, {}, RANGE).reduce((s, m) => s + m.costJmd, 0);
+
+    expect(byOrder.map((r) => r.quoteRef)).toEqual(["VQ-A", "VQ-B"]);
+    expect(byOrder.reduce((s, r) => s + r.costJmd, 0)).toBeCloseTo(periodCostJmd, 6);
+    expect(periodCostJmd).toBe(200_000);
+  });
+
+  it("still excludes costs dated outside the range", () => {
+    const costs: PnlCostInput[] = [
+      {
+        orderId: "o9",
+        amountUsd: null,
+        amountJmd: 75_000,
+        incurredDateIso: "2025-11-05",
+        category: "freight",
+        quoteRef: "VQ-OLD",
+      },
+    ];
+    expect(computePnlByOrder([], costs, {}, RANGE)).toEqual([]);
+  });
+
+  it("orders cost-only rows deterministically by quote ref, not by input order", () => {
+    const make = (orderId: string, quoteRef: string): PnlCostInput => ({
+      orderId,
+      amountUsd: null,
+      amountJmd: 1000,
+      incurredDateIso: "2026-02-05",
+      category: "other",
+      quoteRef,
+    });
+    const forward = computePnlByOrder([], [make("oB", "VQ-B"), make("oA", "VQ-A")], {}, RANGE);
+    const reverse = computePnlByOrder([], [make("oA", "VQ-A"), make("oB", "VQ-B")], {}, RANGE);
+    expect(forward.map((r) => r.quoteRef)).toEqual(["VQ-A", "VQ-B"]);
+    expect(forward).toEqual(reverse);
+  });
+
+  it("carries an unconvertible cost-only order's USD through rather than dropping the order", () => {
+    const costs: PnlCostInput[] = [
+      {
+        orderId: "o9",
+        amountUsd: 400,
+        amountJmd: null,
+        incurredDateIso: "2026-02-05",
+        category: "duty",
+        quoteRef: "VQ-LATE",
+      },
+    ];
+    const rows = computePnlByOrder([], costs, {}, RANGE);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].costJmd).toBe(0);
+    expect(rows[0].unconvertedCostUsd).toBe(400);
   });
 });
 
@@ -281,9 +392,9 @@ describe("mergeCategoryTotals", () => {
 
   it("reconciles with the grand total: merging every month's byCategory sums to the portfolio costJmd", () => {
     const costs: PnlCostInput[] = [
-      { orderId: "o1", amountUsd: null, amountJmd: 10000, incurredDateIso: "2026-01-10", category: "hardware" },
-      { orderId: "o1", amountUsd: null, amountJmd: 4000, incurredDateIso: "2026-02-10", category: "freight" },
-      { orderId: "o1", amountUsd: 100, amountJmd: null, incurredDateIso: "2026-03-10", category: "hardware" },
+      { orderId: "o1", amountUsd: null, amountJmd: 10000, incurredDateIso: "2026-01-10", category: "hardware", quoteRef: "VQ-COST" },
+      { orderId: "o1", amountUsd: null, amountJmd: 4000, incurredDateIso: "2026-02-10", category: "freight", quoteRef: "VQ-COST" },
+      { orderId: "o1", amountUsd: 100, amountJmd: null, incurredDateIso: "2026-03-10", category: "hardware", quoteRef: "VQ-COST" },
     ];
     const monthly = computePnlByMonth([], costs, { o1: RATE }, RANGE);
     const portfolioByCategory = mergeCategoryTotals(monthly);

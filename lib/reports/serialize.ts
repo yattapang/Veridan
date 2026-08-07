@@ -68,7 +68,18 @@ function categoryCells(byCategory: Partial<Record<ActualCostCategory, number>>):
  * negative in the "in" column, so a spreadsheet SUM over either column is
  * meaningful on its own.
  */
-export function cashFlowToCsvRows(monthly: CashFlowMonthRow[], range: ReportDateRange): CsvCell[][] {
+export function cashFlowToCsvRows(
+  monthly: CashFlowMonthRow[],
+  range: ReportDateRange,
+  /**
+   * The live USD→JMD rate description (`describeCurrentFxRate`) when a
+   * USD-only outflow in this file was converted at it; null when nothing
+   * here depended on it. Stating it is not optional politeness — without it
+   * a historical USD outflow silently changes value between two downloads
+   * of the same period, whenever the rate parameter is edited.
+   */
+  currentFxNote: string | null = null,
+): CsvCell[][] {
   const rows: CsvCell[][] = titleBlock("Veridan — Cash flow statement (cash basis)", range);
   rows.push([
     "Cash basis by definition: only payments actually received and bills actually paid appear. Unpaid costs and expenses are excluded.",
@@ -76,6 +87,11 @@ export function cashFlowToCsvRows(monthly: CashFlowMonthRow[], range: ReportDate
   rows.push([
     "Opening/closing balances are cumulative movement within the selected period, starting at zero — they are not bank account balances.",
   ]);
+  if (currentFxNote) {
+    rows.push([
+      `FX note: some outflows were recorded in USD only. An operating expense is not linked to an order and has no quote-locked rate, so it is converted at the CURRENT business-parameter rate as at generation time (${currentFxNote}). That figure can differ if this file is regenerated after the rate parameter changes. USD cost of sales converts at its own order's frozen quote rate and is unaffected.`,
+    ]);
+  }
   rows.push([]);
 
   rows.push(["Monthly summary"]);
@@ -190,6 +206,17 @@ export function incomeStatementToCsvRows(statement: IncomeStatement): CsvCell[][
   rows.push(["Net margin (%)", round1(statement.total.netMarginPct)]);
   rows.push([]);
 
+  // MEMO, not a statement line. GCT is collected on the government's behalf
+  // and is a liability, so it is deliberately outside the Revenue → Net
+  // profit block above and labelled at the point of use.
+  rows.push(["Memo — not revenue, not part of any figure above"]);
+  rows.push([
+    `GCT collected (JMD, ${suffix})`,
+    round2(statement.gctCollectedJmd),
+    "Collected on the government's behalf. A liability, never income — excluded from Revenue, Gross profit and Net profit.",
+  ]);
+  rows.push([]);
+
   const monthHeader: CsvCell[] = [
     "Period",
     `Revenue (JMD, ${suffix})`,
@@ -225,6 +252,9 @@ export function incomeStatementToCsvRows(statement: IncomeStatement): CsvCell[][
   // must never be mistaken for per-order net profit.
   rows.push(["Gross profit by order (operating expenses are NOT allocated to orders)"]);
   rows.push([
+    "Every in-range cost appears here, including an order whose revenue falls outside the period — such a row shows zero revenue and a negative gross profit, so the Cost of sales column below always sums to the Cost of sales line above.",
+  ]);
+  rows.push([
     "Quote ref",
     `Revenue (JMD, ${suffix})`,
     `Cost of sales (JMD, ${suffix})`,
@@ -259,32 +289,51 @@ export function incomeStatementToCsvRows(statement: IncomeStatement): CsvCell[][
 // Transaction detail (the accountant's ledger)
 // ---------------------------------------------------------------------------
 
-export const TRANSACTION_CSV_HEADERS: string[] = [
-  "Date",
-  "Type",
-  "Reference",
-  "Party",
-  "Category",
-  "Description",
-  "Amount JMD (as recorded)",
-  "Amount USD (as recorded)",
-  "Amount JMD (for totalling)",
-  "FX basis",
-  "Date incurred",
-  "Date paid",
-  "Paid?",
-];
+/** Column headers for the ledger. The basis is interpolated so no amount column can be read without it. */
+export function transactionCsvHeaders(basis: ReportBasis): string[] {
+  const suffix = REPORT_BASIS_SUFFIX[basis];
+  return [
+    `Date (${suffix})`,
+    "Type",
+    "Reference",
+    "Party",
+    "Category",
+    "Description",
+    "Amount JMD (as recorded)",
+    "Amount USD (as recorded)",
+    `Amount JMD (for totalling, ${suffix}, net of GCT)`,
+    "GCT (JMD, not revenue)",
+    "FX basis",
+    "Date incurred",
+    "Date paid",
+    "Paid?",
+  ];
+}
 
 export function transactionLedgerToCsvRows(ledger: TransactionLedger): CsvCell[][] {
-  const rows: CsvCell[][] = titleBlock("Veridan — Transaction detail (general ledger)", ledger.range);
+  const basis: ReportBasis = ledger.basis;
+  const suffix = REPORT_BASIS_SUFFIX[basis];
+  const rows: CsvCell[][] = titleBlock(
+    `Veridan — Transaction detail (general ledger, ${REPORT_BASIS_LABELS[basis]} basis)`,
+    ledger.range,
+  );
+  rows.push([REPORT_BASIS_DESCRIPTIONS[basis]]);
   rows.push([
-    "Every recorded financial transaction in the period, chronologically. Amounts are shown exactly as recorded; the 'for totalling' column is the single-currency figure and the 'FX basis' column states how it was arrived at.",
+    `Every recorded financial transaction in the period, chronologically, dated on the ${suffix}. Amounts are shown exactly as recorded; the 'for totalling' column is the single-currency figure and the 'FX basis' column states how it was arrived at.`,
   ]);
   rows.push([
-    "Both dates travel on every row so this listing can be re-cut on either an accrual (date incurred) or a cash (date paid) basis. A blank 'Date paid' means the item is still unpaid.",
+    "This file RECONCILES to the income statement for the same period and basis: Money in equals its Revenue line, Money out equals Cost of sales plus Operating expenses, and Net equals Net profit.",
+  ]);
+  rows.push([
+    basis === "accrual"
+      ? "Accrual basis: revenue rows are invoices ISSUED (payments are not listed — that would double-count the invoice), and costs and expenses are dated when incurred, paid or not. A blank 'Date paid' means the item is still unpaid."
+      : "Cash basis: revenue rows are payments RECEIVED (issued invoices are not listed), and costs and expenses are dated when paid. Anything with no payment date recorded is excluded entirely.",
+  ]);
+  rows.push([
+    "On a revenue row the 'for totalling' amount is NET of GCT and the GCT column carries the rest, so as-recorded = for-totalling + GCT. GCT is collected for the government and is never revenue.",
   ]);
   rows.push([]);
-  rows.push(TRANSACTION_CSV_HEADERS);
+  rows.push(transactionCsvHeaders(basis));
 
   for (const r of ledger.rows) {
     rows.push([
@@ -297,6 +346,7 @@ export function transactionLedgerToCsvRows(ledger: TransactionLedger): CsvCell[]
       round2(r.amountJmd),
       round2(r.amountUsd),
       round2(r.resolvedJmd),
+      round2(r.gctJmd),
       TRANSACTION_FX_BASIS_LABELS[r.fxBasis],
       r.incurredDateIso,
       r.paidDateIso,
@@ -306,9 +356,13 @@ export function transactionLedgerToCsvRows(ledger: TransactionLedger): CsvCell[]
 
   rows.push([]);
   rows.push(["Totals"]);
-  rows.push(["Money in (JMD)", round2(ledger.totalInJmd)]);
-  rows.push(["Money out (JMD)", round2(ledger.totalOutJmd)]);
-  rows.push(["Net (JMD)", round2(ledger.netJmd)]);
+  rows.push([`Money in (JMD, ${suffix})`, round2(ledger.totalInJmd)]);
+  rows.push([`Money out (JMD, ${suffix})`, round2(ledger.totalOutJmd)]);
+  rows.push([`Net (JMD, ${suffix})`, round2(ledger.netJmd)]);
+  rows.push([
+    `GCT collected (JMD, ${suffix}) — memo, not revenue`,
+    round2(ledger.gctCollectedJmd),
+  ]);
   if (ledger.unresolvedRowCount > 0) {
     rows.push([
       `Rows excluded from the totals (no FX rate available): ${ledger.unresolvedRowCount}`,

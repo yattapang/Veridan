@@ -7,7 +7,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
-import { NOT_AUTHENTICATED, parseExportRange, SUPABASE_NOT_CONFIGURED, xlsxResponse } from "@/lib/reports/exportHttp";
+import { invalidRangeResponse, NOT_AUTHENTICATED, parseExportRange, SUPABASE_NOT_CONFIGURED, xlsxResponse } from "@/lib/reports/exportHttp";
 import { loadMarginAuditData } from "@/lib/reports/load";
 import { buildMarginAudit } from "@/lib/reports/marginAudit";
 import { buildMarginAuditWorkbook } from "@/lib/reports/xlsx";
@@ -27,6 +27,7 @@ export async function GET(request: Request) {
   }
 
   const range = parseExportRange(request);
+  if (!range) return invalidRangeResponse();
   const { data, error } = await loadMarginAuditData(supabase, range);
   if (error || !data) {
     return NextResponse.json({ error: error ?? "Could not load report." }, { status: 500 });

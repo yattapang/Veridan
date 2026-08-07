@@ -5,7 +5,7 @@ import { formatJmd, formatPct, formatUsd } from "@/lib/quotes/format";
 import { ACTUAL_COST_CATEGORY_LABELS } from "@/lib/orders/format";
 import { describeCurrentFxRate } from "@/lib/expenses/expense";
 import { parseReportBasis, REPORT_BASIS_LABELS, REPORT_BASIS_SUFFIX } from "@/lib/reports/basis";
-import { yearToDateRange, type ReportDateRange } from "@/lib/reports/period";
+import { parseReportDateRange, yearToDateRange } from "@/lib/reports/period";
 import { buildIncomeStatement, type IncomeStatementColumn } from "@/lib/reports/incomeStatement";
 import { loadFinancialStatementData } from "@/lib/reports/load";
 import { BasisToggle } from "../BasisToggle";
@@ -44,13 +44,9 @@ export default async function IncomeStatementPage({
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const query = await searchParams;
-  const startParam = firstParam(query.start).trim();
-  const endParam = firstParam(query.end).trim();
-  const defaultRange = yearToDateRange();
-  const range: ReportDateRange = {
-    startIso: startParam || defaultRange.startIso,
-    endIso: endParam || defaultRange.endIso,
-  };
+  // A malformed or reversed range falls back to year-to-date rather than
+  // being passed through to the query layer.
+  const range = parseReportDateRange(firstParam(query.start), firstParam(query.end)) ?? yearToDateRange();
   const basis = parseReportBasis(query.basis);
   const suffix = REPORT_BASIS_SUFFIX[basis];
 
@@ -178,6 +174,27 @@ export default async function IncomeStatementPage({
               ))}
             </tbody>
           </table>
+        </div>
+      </section>
+
+      {/* MEMO, deliberately outside the statement block above. GCT is money
+          held for the government, not income — so it is reported where it can
+          be reconciled against a GCT return, and nowhere near a margin. */}
+      <section className="mt-4">
+        <div className="rounded-md border border-veridan-warm-gray-light bg-veridan-warm-gray-pale/50 px-4 py-3">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <p className="text-xs font-medium uppercase tracking-wide text-veridan-warm-gray">
+              Memo · GCT collected ({suffix})
+            </p>
+            <p className="text-sm font-semibold text-veridan-ink">{formatJmd(statement.gctCollectedJmd, 2)}</p>
+          </div>
+          <p className="mt-1 max-w-3xl text-xs text-veridan-warm-gray">
+            <strong className="text-veridan-ink">Not revenue.</strong> GCT is collected on the government&apos;s
+            behalf and is a liability, so it is excluded from Revenue, Gross profit and Net profit above.{" "}
+            {basis === "accrual"
+              ? "Accrual basis: GCT billed on the invoices issued in this period."
+              : "Cash basis: the GCT share of the payments received in this period, pro-rated against each invoice."}
+          </p>
         </div>
       </section>
 
@@ -344,12 +361,14 @@ export default async function IncomeStatementPage({
         <p className="mb-3 max-w-3xl text-xs text-veridan-warm-gray">
           Gross profit only — operating expenses are <strong>not</strong> allocated to orders. Rent is not a cost
           of any one shipment, and splitting it across orders would turn a measured figure into an assumption.
-          Net profit exists at period level only.
+          Net profit exists at period level only. Every in-range cost appears here: an order whose revenue falls
+          outside this period shows zero revenue and a negative gross profit, so the cost of sales column always
+          sums to the cost of sales line above.
         </p>
         {statement.grossProfitByOrder.length === 0 ? (
           <InstructiveMessage
-            title="No order-attributed revenue in this range"
-            body="Revenue not yet linked to an order (its quote has no order created) still counts in the totals above, but has no row here."
+            title="No order-attributed activity in this range"
+            body="Nothing in this period is linked to an order yet. Revenue whose quote has no order created still counts in the totals above but has no row here; costs are always order-linked, so any in-range cost of sales would appear."
           />
         ) : (
           <div className="overflow-x-auto rounded-md border border-veridan-warm-gray-light bg-white">

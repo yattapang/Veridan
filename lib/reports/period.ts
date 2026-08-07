@@ -72,6 +72,53 @@ export function yearToDateRange(now: Date = new Date()): ReportDateRange {
   return { startIso: `${today.slice(0, 4)}-01-01`, endIso: today };
 }
 
+/**
+ * The ONLY shape a report date parameter may take: a zero-padded ISO calendar
+ * date. Deliberately strict — `2026-1-5` is rejected rather than silently
+ * coerced, because these strings are compared as STRINGS throughout this
+ * module (`isWithinReportRange`, `monthKeysInRange`) and an unpadded value
+ * sorts wrongly against a padded one.
+ */
+export const REPORT_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Validates a raw `start`/`end` pair off a query string into a range.
+ *
+ * A BLANK value means "use the fallback for that end" (so `?start=2026-04-01`
+ * alone is a valid open-ended-to-today request). A MALFORMED value, or a
+ * reversed pair where the start is after the end, yields `null` — the caller
+ * decides what that means: a report page falls back to year-to-date, an
+ * export route returns 400.
+ *
+ * This is also the gate that keeps unvalidated user text out of the
+ * PostgREST filter strings lib/reports/load.ts interpolates a range into:
+ * a value matching this pattern cannot contain a comma, parenthesis or dot
+ * and so cannot restructure a filter expression.
+ */
+export function parseReportDateRange(
+  startRaw: string | null | undefined,
+  endRaw: string | null | undefined,
+  fallback: ReportDateRange = yearToDateRange(),
+): ReportDateRange | null {
+  const start = (startRaw ?? "").trim();
+  const end = (endRaw ?? "").trim();
+  if (start !== "" && !REPORT_DATE_PATTERN.test(start)) return null;
+  if (end !== "" && !REPORT_DATE_PATTERN.test(end)) return null;
+
+  const startIso = start || fallback.startIso;
+  const endIso = end || fallback.endIso;
+  if (startIso > endIso) return null;
+
+  return { startIso, endIso };
+}
+
+/** Shifts a `YYYY-MM-DD` calendar date by whole days, staying in UTC so no local-time drift creeps in. */
+export function shiftIsoDate(dateIso: string, days: number): string {
+  const [y, m, d] = dateIso.split("-").map(Number);
+  const shifted = new Date(Date.UTC(y, m - 1, d + days));
+  return `${shifted.getUTCFullYear()}-${pad2(shifted.getUTCMonth() + 1)}-${pad2(shifted.getUTCDate())}`;
+}
+
 /** True when `dateIso` (a `date`-typed, no-time string) falls within [startIso, endIso], both inclusive. */
 export function isWithinReportRange(dateIso: string | null | undefined, range: ReportDateRange): boolean {
   if (!dateIso) return false;

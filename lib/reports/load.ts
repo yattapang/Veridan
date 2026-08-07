@@ -24,9 +24,14 @@ import type {
 import { ACTUAL_COST_CATEGORY_LABELS } from "../orders/format";
 import { buildCurrentFxRate, expenseAmountJmd, type CurrentFxRate } from "../expenses/expense";
 import type { CashInEntry, CashOutEntry } from "./cashflow";
-import type { IssuedInvoiceInput } from "./incomeStatement";
-import { jamaicaDateFromTimestamp } from "./period";
-import type { LedgerCostInput, LedgerExpenseInput, LedgerPaymentInput } from "./transactions";
+import { invoiceRevenueShare, roundJmd } from "./incomeStatement";
+import { jamaicaDateFromTimestamp, shiftIsoDate } from "./period";
+import type {
+  LedgerCostInput,
+  LedgerExpenseInput,
+  LedgerInvoiceInput,
+  LedgerPaymentInput,
+} from "./transactions";
 import {
   quotedCategoriesFromOrigins,
   type MarginAuditCostInput,
@@ -36,31 +41,13 @@ import {
   type QuoteOriginCostRow,
 } from "./marginAudit";
 import { isWithinReportRange, type ReportDateRange } from "./period";
-import { costAmountJmd, type OrderRateLookup, type PnlCostInput, type PnlPaymentInput } from "./pnl";
+import { costAmountJmd, type OrderRateLookup } from "./pnl";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 
 // ---------------------------------------------------------------------------
-// P&L
+// Shared: order → locked FX rate lookup
 // ---------------------------------------------------------------------------
-
-interface PnlPaymentJoinRow {
-  amount_jmd: number;
-  paid_at: string;
-  invoices: {
-    invoice_number: string;
-    quote_id: string;
-    quotes: { quote_ref: string } | null;
-  } | null;
-}
-
-interface PnlCostJoinRow {
-  order_id: string;
-  category: ActualCostCategory;
-  amount_usd: number | null;
-  amount_jmd: number | null;
-  incurred_date: string;
-}
 
 interface PnlOrderJoinRow {
   id: string;
@@ -68,99 +55,53 @@ interface PnlOrderJoinRow {
   quotes: { fx_snapshot: { effective_rate: number } } | null;
 }
 
-export interface PnlData {
-  payments: PnlPaymentInput[];
-  costs: PnlCostInput[];
-  rateByOrderId: OrderRateLookup;
+/**
+ * PostgREST caps a response at `db-max-rows` (1000 by default) and returns
+ * the truncated page WITHOUT an error, so an unbounded `.select()` that
+ * outgrows the cap silently under-reports. Every unbounded fetch in this
+ * module goes through here instead: it pages with `.range()` until a short
+ * page comes back, so the caller always gets the complete set or an error.
+ */
+const PAGE_SIZE = 1000;
+
+async function fetchAllPages<T>(
+  page: (from: number, to: number) => PromiseLike<{ data: unknown; error: { message: string } | null }>,
+): Promise<{ data: T[] | null; error: string | null }> {
+  const all: T[] = [];
+  for (let offset = 0; ; offset += PAGE_SIZE) {
+    const { data, error } = await page(offset, offset + PAGE_SIZE - 1);
+    if (error) return { data: null, error: error.message };
+    const rows = (data as T[] | null) ?? [];
+    all.push(...rows);
+    if (rows.length < PAGE_SIZE) return { data: all, error: null };
+  }
 }
 
-export async function loadPnlData(
+/**
+ * Every order's quote-locked `fx_snapshot.effective_rate`, plus the
+ * quote-id → order-id map the reports join on.
+ *
+ * Deliberately NOT range-filtered: a cost incurred inside the range can
+ * belong to an order created outside it (and can even be backdated before
+ * its own order's `created_at`), so any date filter here would drop the rate
+ * a converted figure depends on and turn a real cost into an "unconverted"
+ * one. Paged instead, so the row cap cannot truncate it either.
+ */
+async function loadOrderRates(
   supabase: SupabaseServerClient,
-  range: ReportDateRange,
-): Promise<{ data: PnlData | null; error: string | null }> {
-  const [paymentsResult, costsResult, ordersResult] = await Promise.all([
-    supabase
-      .from("invoice_payments")
-      .select("amount_jmd, paid_at, invoices(invoice_number, quote_id, quotes(quote_ref))")
-      .gte("paid_at", range.startIso)
-      .lte("paid_at", range.endIso),
-    supabase
-      .from("actual_costs")
-      .select("order_id, category, amount_usd, amount_jmd, incurred_date")
-      .gte("incurred_date", range.startIso)
-      .lte("incurred_date", range.endIso),
-    supabase.from("orders").select("id, quote_id, quotes(fx_snapshot)"),
-  ]);
+): Promise<{ quoteIdToOrderId: Map<string, string>; rateByOrderId: OrderRateLookup } | { error: string }> {
+  const { data, error } = await fetchAllPages<PnlOrderJoinRow>((from, to) =>
+    supabase.from("orders").select("id, quote_id, quotes(fx_snapshot)").order("id", { ascending: true }).range(from, to),
+  );
+  if (error || !data) return { error: error ?? "Could not load orders." };
 
-  const loadError = paymentsResult.error ?? costsResult.error ?? ordersResult.error;
-  if (loadError) return { data: null, error: loadError.message };
-
-  const orders = (ordersResult.data as unknown as PnlOrderJoinRow[]) ?? [];
-  const quoteIdToOrderId = new Map(orders.map((o) => [o.quote_id, o.id]));
+  const quoteIdToOrderId = new Map(data.map((o) => [o.quote_id, o.id]));
   const rateByOrderId: OrderRateLookup = {};
-  for (const o of orders) {
+  for (const o of data) {
     const rate = o.quotes?.fx_snapshot?.effective_rate;
     if (rate != null) rateByOrderId[o.id] = rate;
   }
-
-  const payments: PnlPaymentInput[] = ((paymentsResult.data as unknown as PnlPaymentJoinRow[]) ?? []).map((p) => ({
-    amountJmd: p.amount_jmd,
-    paidAtIso: p.paid_at,
-    orderId: p.invoices?.quote_id ? (quoteIdToOrderId.get(p.invoices.quote_id) ?? null) : null,
-    quoteRef: p.invoices?.quotes?.quote_ref ?? "—",
-    invoiceNumber: p.invoices?.invoice_number ?? "—",
-  }));
-
-  const costs: PnlCostInput[] = ((costsResult.data as unknown as PnlCostJoinRow[]) ?? []).map((c) => ({
-    orderId: c.order_id,
-    amountUsd: c.amount_usd,
-    amountJmd: c.amount_jmd,
-    incurredDateIso: c.incurred_date,
-    category: c.category,
-  }));
-
-  return { data: { payments, costs, rateByOrderId }, error: null };
-}
-
-// ---------------------------------------------------------------------------
-// Cash flow
-// ---------------------------------------------------------------------------
-
-interface CashFlowJoinRow {
-  amount_jmd: number;
-  paid_at: string;
-  method: string | null;
-  reference: string | null;
-  invoices: {
-    invoice_number: string;
-    invoice_type: InvoiceType;
-    quotes: { quote_ref: string } | null;
-  } | null;
-}
-
-export async function loadCashFlowData(
-  supabase: SupabaseServerClient,
-  range: ReportDateRange,
-): Promise<{ data: CashInEntry[] | null; error: string | null }> {
-  const { data, error } = await supabase
-    .from("invoice_payments")
-    .select("amount_jmd, paid_at, method, reference, invoices(invoice_number, invoice_type, quotes(quote_ref))")
-    .gte("paid_at", range.startIso)
-    .lte("paid_at", range.endIso);
-
-  if (error) return { data: null, error: error.message };
-
-  const entries: CashInEntry[] = ((data as unknown as CashFlowJoinRow[]) ?? []).map((p) => ({
-    amountJmd: p.amount_jmd,
-    paidAtIso: p.paid_at,
-    invoiceNumber: p.invoices?.invoice_number ?? "—",
-    invoiceType: p.invoices?.invoice_type ?? "deposit",
-    quoteRef: p.invoices?.quotes?.quote_ref ?? "—",
-    method: p.method,
-    reference: p.reference,
-  }));
-
-  return { data: entries, error: null };
+  return { quoteIdToOrderId, rateByOrderId };
 }
 
 // ---------------------------------------------------------------------------
@@ -366,7 +307,11 @@ export async function loadCurrentFxRate(supabase: SupabaseServerClient): Promise
 interface IssuedInvoiceJoinRow {
   invoice_number: string;
   quote_id: string;
+  /** subtotal + GCT — what the client owes. NOT revenue. */
   amount_jmd: number;
+  /** GCT-exclusive. THIS is revenue (see lib/reports/incomeStatement.ts). */
+  subtotal_jmd: number | null;
+  gct_amount_jmd: number | null;
   issued_at: string | null;
   status: InvoiceStatus;
   quotes: { quote_ref: string } | null;
@@ -409,6 +354,9 @@ interface FinancialPaymentJoinRow {
     invoice_number: string;
     invoice_type: InvoiceType;
     quote_id: string;
+    /** Carried so the payment can be pro-rated into its revenue and GCT shares. */
+    subtotal_jmd: number | null;
+    amount_jmd: number | null;
     quotes: { quote_ref: string } | null;
     companies: { name: string } | null;
   } | null;
@@ -416,7 +364,7 @@ interface FinancialPaymentJoinRow {
 
 export interface FinancialStatementData {
   /** Accrual-basis revenue events — invoices issued (non-void) within the range. */
-  issuedInvoices: IssuedInvoiceInput[];
+  issuedInvoices: LedgerInvoiceInput[];
   /** Cash-basis revenue events, in the ledger shape (a superset of the income statement's). */
   payments: LedgerPaymentInput[];
   /** The same payments in the cash-flow statement's inflow shape. */
@@ -431,27 +379,43 @@ export async function loadFinancialStatementData(
   supabase: SupabaseServerClient,
   range: ReportDateRange,
 ): Promise<{ data: FinancialStatementData | null; error: string | null }> {
+  // Safe to interpolate: `range` reaches this function only via
+  // parseReportDateRange / parseExportRange, which reject anything that is
+  // not `\d{4}-\d{2}-\d{2}` — so neither value can contain a comma,
+  // parenthesis or dot and restructure the filter expression.
   const eitherDateInRange =
     `and(incurred_date.gte.${range.startIso},incurred_date.lte.${range.endIso}),` +
     `and(paid_date.gte.${range.startIso},paid_date.lte.${range.endIso})`;
 
-  const [invoicesResult, paymentsResult, costsResult, expensesResult, ordersResult, fx] = await Promise.all([
-    // Issued, non-void invoices, fetched WITHOUT a server-side issued_at
-    // filter and narrowed in memory below: issued_at is a timestamptz while
-    // the range is a pair of Jamaica-local calendar dates, so a raw
-    // gte/lte on the instant would misfile an invoice issued late in the
-    // evening (and, at a month boundary, into the wrong column). Same
-    // timezone-safety approach loadMarginAuditData already takes, at
-    // small-importer row counts.
-    supabase
-      .from("invoices")
-      .select("invoice_number, quote_id, amount_jmd, issued_at, status, quotes(quote_ref), companies(name)")
-      .neq("status", "void")
-      .not("issued_at", "is", null),
+  // A WIDE server-side window on issued_at, then the precise Jamaica-local
+  // narrowing in memory below. `issued_at` is a timestamptz while the range
+  // is a pair of Jamaica-local calendar dates, so a tight gte/lte on the
+  // instant would misfile an invoice issued late in the evening (and, at a
+  // month boundary, into the wrong column). A day of slack on each side
+  // covers the 5-hour offset with room to spare, while still bounding the
+  // query so a growing invoices table cannot hit PostgREST's row cap and
+  // silently under-report revenue.
+  const issuedFromIso = `${shiftIsoDate(range.startIso, -1)}T00:00:00Z`;
+  const issuedToIso = `${shiftIsoDate(range.endIso, 1)}T23:59:59.999Z`;
+
+  const [invoicesResult, paymentsResult, costsResult, expensesResult, orderRates, fx] = await Promise.all([
+    fetchAllPages<IssuedInvoiceJoinRow>((from, to) =>
+      supabase
+        .from("invoices")
+        .select(
+          "invoice_number, quote_id, amount_jmd, subtotal_jmd, gct_amount_jmd, issued_at, status, quotes(quote_ref), companies(name)",
+        )
+        .neq("status", "void")
+        .not("issued_at", "is", null)
+        .gte("issued_at", issuedFromIso)
+        .lte("issued_at", issuedToIso)
+        .order("invoice_number", { ascending: true })
+        .range(from, to),
+    ),
     supabase
       .from("invoice_payments")
       .select(
-        "amount_jmd, paid_at, method, reference, invoices(invoice_number, invoice_type, quote_id, quotes(quote_ref), companies(name))",
+        "amount_jmd, paid_at, method, reference, invoices(invoice_number, invoice_type, quote_id, subtotal_jmd, amount_jmd, quotes(quote_ref), companies(name))",
       )
       .gte("paid_at", range.startIso)
       .lte("paid_at", range.endIso),
@@ -467,50 +431,63 @@ export async function loadFinancialStatementData(
         "description, vendor, amount_jmd, amount_usd, incurred_date, paid_date, payment_method, reference, expense_categories(name, label)",
       )
       .or(eitherDateInRange),
-    supabase.from("orders").select("id, quote_id, quotes(fx_snapshot)"),
+    loadOrderRates(supabase),
     loadCurrentFxRate(supabase),
   ]);
 
+  if ("error" in orderRates) return { data: null, error: orderRates.error };
   const loadError =
-    invoicesResult.error ?? paymentsResult.error ?? costsResult.error ?? expensesResult.error ?? ordersResult.error;
-  if (loadError) return { data: null, error: loadError.message };
+    invoicesResult.error ??
+    paymentsResult.error?.message ??
+    costsResult.error?.message ??
+    expensesResult.error?.message;
+  if (loadError) return { data: null, error: loadError };
 
-  const orders = (ordersResult.data as unknown as PnlOrderJoinRow[]) ?? [];
-  const quoteIdToOrderId = new Map(orders.map((o) => [o.quote_id, o.id]));
-  const rateByOrderId: OrderRateLookup = {};
-  for (const o of orders) {
-    const rate = o.quotes?.fx_snapshot?.effective_rate;
-    if (rate != null) rateByOrderId[o.id] = rate;
-  }
+  const { quoteIdToOrderId, rateByOrderId } = orderRates;
 
-  const issuedInvoices: IssuedInvoiceInput[] = (
-    (invoicesResult.data as unknown as IssuedInvoiceJoinRow[]) ?? []
-  ).flatMap((inv) => {
+  const issuedInvoices: LedgerInvoiceInput[] = (invoicesResult.data ?? []).flatMap((inv) => {
     if (!inv.issued_at) return [];
     const issuedDateIso = jamaicaDateFromTimestamp(inv.issued_at);
     if (!isWithinReportRange(issuedDateIso, range)) return [];
+    // Revenue is the GCT-EXCLUSIVE subtotal. `gct_amount_jmd` is NOT NULL
+    // with a 0 default, so the fallbacks below only ever fire for a row
+    // predating the column — in which case the whole amount is revenue and
+    // no GCT is claimed, which is the honest reading of "no split recorded".
+    const revenueJmd = inv.subtotal_jmd ?? inv.amount_jmd;
     return [
       {
-        amountJmd: inv.amount_jmd,
+        grossAmountJmd: inv.amount_jmd,
+        revenueJmd,
+        gctJmd: inv.gct_amount_jmd ?? roundJmd(inv.amount_jmd - revenueJmd),
         issuedDateIso,
         orderId: quoteIdToOrderId.get(inv.quote_id) ?? null,
         quoteRef: inv.quotes?.quote_ref ?? "—",
         invoiceNumber: inv.invoice_number,
+        companyName: inv.companies?.name ?? null,
       },
     ];
   });
 
   const paymentRows = (paymentsResult.data as unknown as FinancialPaymentJoinRow[]) ?? [];
-  const payments: LedgerPaymentInput[] = paymentRows.map((p) => ({
-    amountJmd: p.amount_jmd,
-    paidAtIso: p.paid_at,
-    orderId: p.invoices?.quote_id ? (quoteIdToOrderId.get(p.invoices.quote_id) ?? null) : null,
-    quoteRef: p.invoices?.quotes?.quote_ref ?? "—",
-    invoiceNumber: p.invoices?.invoice_number ?? "—",
-    companyName: p.invoices?.companies?.name ?? null,
-    method: p.method,
-    reference: p.reference,
-  }));
+  const payments: LedgerPaymentInput[] = paymentRows.map((p) => {
+    // A part payment settles the GCT and the net in the proportion the
+    // invoice was raised in, so the payment is pro-rated by the invoice's
+    // subtotal/gross ratio rather than having GCT assigned to it in full or
+    // not at all.
+    const revenueJmd = roundJmd(p.amount_jmd * invoiceRevenueShare(p.invoices?.subtotal_jmd, p.invoices?.amount_jmd));
+    return {
+      amountJmd: p.amount_jmd,
+      revenueJmd,
+      gctJmd: roundJmd(p.amount_jmd - revenueJmd),
+      paidAtIso: p.paid_at,
+      orderId: p.invoices?.quote_id ? (quoteIdToOrderId.get(p.invoices.quote_id) ?? null) : null,
+      quoteRef: p.invoices?.quotes?.quote_ref ?? "—",
+      invoiceNumber: p.invoices?.invoice_number ?? "—",
+      companyName: p.invoices?.companies?.name ?? null,
+      method: p.method,
+      reference: p.reference,
+    };
+  });
 
   const cashIn: CashInEntry[] = paymentRows.map((p) => ({
     amountJmd: p.amount_jmd,
@@ -560,16 +537,35 @@ export async function loadFinancialStatementData(
  * not a cash movement (see lib/reports/cashflow.ts's header). A row whose
  * amount cannot be resolved to JMD is reported in `unconvertedUsd` rather
  * than counted as zero.
+ *
+ * `range` IS REQUIRED, AND IS APPLIED HERE. The loader's cost/expense query
+ * is deliberately wide (it fetches a row when EITHER of its two dates falls
+ * in range), so a December bill paid in January arrives in a January-only
+ * load. `computeCashFlowByMonth` drops such a row from the monthly buckets,
+ * but the `unconvertedUsd` tally computed here does not go through it — so
+ * without this check the amber "could not be converted" warning counted
+ * out-of-range rows and overstated the shortfall.
+ *
+ * `usedCurrentRateConversion` reports whether any outflow above is a
+ * USD-only OPERATING EXPENSE converted at the live parameter rate, so the
+ * page discloses the live-rate caveat exactly when it applies (a historical
+ * USD outflow otherwise changes value whenever the founder edits the rate).
  */
-export function buildCashOutEntries(data: FinancialStatementData): {
+export function buildCashOutEntries(
+  data: FinancialStatementData,
+  range: ReportDateRange,
+): {
   entries: CashOutEntry[];
   unconvertedUsd: number;
+  usedCurrentRateConversion: boolean;
 } {
   const entries: CashOutEntry[] = [];
   let unconvertedUsd = 0;
+  let usedCurrentRateConversion = false;
 
   for (const c of data.costs) {
     if (c.paidDateIso == null) continue;
+    if (!isWithinReportRange(c.paidDateIso, range)) continue;
     const amountJmd = costAmountJmd(c, data.rateByOrderId);
     if (amountJmd == null) {
       unconvertedUsd += c.amountUsd ?? 0;
@@ -588,11 +584,16 @@ export function buildCashOutEntries(data: FinancialStatementData): {
 
   for (const e of data.expenses) {
     if (e.paidDateIso == null) continue;
+    if (!isWithinReportRange(e.paidDateIso, range)) continue;
     const amountJmd = expenseAmountJmd(e, data.fx);
     if (amountJmd == null) {
       unconvertedUsd += e.amountUsd ?? 0;
       continue;
     }
+    // A USD-only expense has no order and therefore no locked rate: this
+    // figure came from the CURRENT parameter rate and is not stable over
+    // time. Only such a row triggers the page's FX disclosure.
+    if (e.amountJmd == null && e.amountUsd != null) usedCurrentRateConversion = true;
     entries.push({
       amountJmd,
       paidAtIso: e.paidDateIso,
@@ -604,5 +605,5 @@ export function buildCashOutEntries(data: FinancialStatementData): {
     });
   }
 
-  return { entries, unconvertedUsd };
+  return { entries, unconvertedUsd, usedCurrentRateConversion };
 }

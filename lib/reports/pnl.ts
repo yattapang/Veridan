@@ -42,6 +42,15 @@ export interface PnlCostInput {
   /** `date`-typed, actual_costs.incurred_date. */
   incurredDateIso: string;
   category: ActualCostCategory;
+  /**
+   * Display label of the cost's order (its quote's ref) — never an input to
+   * any sum, exactly like `PnlOrderRow.quoteRef`. It travels on the COST row
+   * so `computePnlByOrder` can open a row for an order that has costs in the
+   * period but no in-range revenue; without it such an order silently
+   * vanished and the per-order block stopped summing to the statement's Cost
+   * of sales line.
+   */
+  quoteRef: string;
 }
 
 /** JMD-per-USD locked rate for each order's quote (`fx_snapshot.effective_rate`), keyed by order id. */
@@ -177,6 +186,13 @@ export interface PnlOrderRow {
  * still count toward `computePnlByMonth`'s totals, since that view is
  * period-scoped rather than order-scoped, but there is no order row to
  * attribute them to here.
+ *
+ * AN ORDER WITH COSTS BUT NO IN-RANGE REVENUE STILL GETS A ROW. Its revenue
+ * is zero and its gross profit is negative, which is the true picture of a
+ * shipment whose bills landed in this period and whose invoice landed in
+ * another. Dropping it (as this function once did, for want of a `quoteRef`
+ * on the cost row) made the per-order block fail to sum to the Cost of sales
+ * line printed directly above it.
  */
 export function computePnlByOrder(
   payments: PnlPaymentInput[],
@@ -214,13 +230,10 @@ export function computePnlByOrder(
 
   for (const c of costs) {
     if (!isWithinReportRange(c.incurredDateIso, range)) continue;
-    // A cost can exist for an order with no payments yet in range — ensureRow
-    // needs a quoteRef, which the cost input doesn't carry, so costs for an
-    // order with no matching payment row are skipped here (a founder viewing
-    // "revenue vs cost per order" before any cash has come in should look at
-    // the order detail page's actuals panel instead, which has no such gap).
-    const row = rowByOrder.get(c.orderId);
-    if (!row) continue;
+    // A cost can exist for an order with no in-range revenue. The cost row
+    // carries its own quoteRef, so we open a cost-only row (zero revenue,
+    // negative gross profit) rather than dropping the cost.
+    const row = ensureRow(c.orderId, c.quoteRef);
     const jmd = costAmountJmd(c, rateByOrderId);
     if (jmd == null) {
       row.unconvertedCostUsd += c.amountUsd ?? 0;
@@ -236,5 +249,10 @@ export function computePnlByOrder(
     row.marginPct = row.revenueJmd > 0 ? (row.grossProfitJmd / row.revenueJmd) * 100 : null;
   }
 
-  return Array.from(rowByOrder.values()).sort((a, b) => b.revenueJmd - a.revenueJmd);
+  // Revenue descending, then quote ref — the tiebreak matters now that
+  // cost-only rows all share a revenue of zero and would otherwise order
+  // by Map insertion, i.e. by whatever order the loader happened to return.
+  return Array.from(rowByOrder.values()).sort(
+    (a, b) => b.revenueJmd - a.revenueJmd || a.quoteRef.localeCompare(b.quoteRef),
+  );
 }

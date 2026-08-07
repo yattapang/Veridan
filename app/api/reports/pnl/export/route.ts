@@ -14,7 +14,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
 import { parseReportBasis } from "@/lib/reports/basis";
 import { buildCsvDocument } from "@/lib/reports/csv";
-import { csvResponse, NOT_AUTHENTICATED, parseExportRange, SUPABASE_NOT_CONFIGURED } from "@/lib/reports/exportHttp";
+import { csvResponse, invalidRangeResponse, NOT_AUTHENTICATED, parseExportRange, SUPABASE_NOT_CONFIGURED } from "@/lib/reports/exportHttp";
 import { buildIncomeStatement } from "@/lib/reports/incomeStatement";
 import { loadFinancialStatementData } from "@/lib/reports/load";
 import { incomeStatementToCsvRows } from "@/lib/reports/serialize";
@@ -32,6 +32,7 @@ export async function GET(request: Request) {
   }
 
   const range = parseExportRange(request);
+  if (!range) return invalidRangeResponse();
   const basis = parseReportBasis(new URL(request.url).searchParams.get("basis"));
 
   const { data, error } = await loadFinancialStatementData(supabase, range);
