@@ -58,14 +58,22 @@ export default async function ArticlesPage({
 
   return (
     <div className="max-w-4xl">
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold text-veridan-ink">Articles</h1>
-        <Link
-          href="/admin/articles/new"
-          className="rounded-md bg-veridan-ink px-4 py-2 text-xs font-medium uppercase tracking-wide text-veridan-paper transition-opacity duration-150 hover:opacity-90"
-        >
-          New article
-        </Link>
+        <div className="flex items-center gap-4">
+          <Link
+            href="/admin/articles/categories"
+            className="text-xs font-medium text-veridan-accent underline underline-offset-2 hover:text-veridan-accent-soft"
+          >
+            Manage categories
+          </Link>
+          <Link
+            href="/admin/articles/new"
+            className="rounded-md bg-veridan-ink px-4 py-2 text-xs font-medium uppercase tracking-wide text-veridan-paper transition-opacity duration-150 hover:opacity-90"
+          >
+            New article
+          </Link>
+        </div>
       </div>
 
       <nav aria-label="Filter by status" className="mb-6 flex gap-1 border-b border-veridan-warm-gray-light">

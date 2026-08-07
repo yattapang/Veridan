@@ -826,6 +826,36 @@ export interface ArticleAiDraftLogRow {
   created_at: string;
 }
 
+/**
+ * article_categories (2026-08-06, admin-managed category list) — see
+ * supabase/migrations/20260806000001_article_categories.sql and
+ * lib/articles/categoryAdmin.ts. Deliberately NOT related to ArticleRow by
+ * a foreign key: articles.category stays free text (Phase 3B design,
+ * unchanged). This is the suggestion/管理 list, not a referential
+ * constraint — deleting a row here never touches an article.
+ */
+export interface ArticleCategoryRow {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * article_categories row + its computed usage count, for the admin CRUD
+ * list (/admin/articles/categories). There's no FK from articles to this
+ * table (by design — see ArticleCategoryRow's comment), so `usageCount`
+ * isn't a DB join/aggregate; it's computed in JS from every article's
+ * `category` string via lib/articles/categoryAdmin.ts's
+ * computeCategoryUsageCounts.
+ */
+export interface ArticleCategoryWithUsageCount extends ArticleCategoryRow {
+  usageCount: number;
+}
+
 // ---------------------------------------------------------------------------
 // Phase 3C — Catalogue/spec library (Plan §3.2). See
 // supabase/migrations/20260723000002_catalogue_library.sql and lib/catalogue/.

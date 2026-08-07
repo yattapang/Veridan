@@ -3,6 +3,8 @@ import { Suspense } from "react";
 import { Container } from "@/components/Container";
 import { PageHero } from "@/components/PageHero";
 import { getPublishedArticles, publicHeroImageUrl, type PublicArticle } from "@/lib/articles/publicLoader";
+import { getManagedArticleCategories } from "@/lib/articles/categoriesLoader";
+import { orderCategoriesForPublicFilter } from "@/lib/articles/categoryAdmin";
 import { markdownToPlainText } from "@/lib/articles/markdown";
 import { ArticleGrid, type ArticleListItem } from "./ArticleGrid";
 import { ArticleListClient } from "./ArticleListClient";
@@ -29,15 +31,26 @@ function excerptFor(article: PublicArticle): string {
 // what a static prerender bakes in and what most visitors (no ?category=)
 // see immediately; a category-filtered view hydrates in client-side.
 export default async function ArticlesListPage() {
-  const articles = await getPublishedArticles();
+  // Both reads are cookie-free (see lib/articles/publicLoader.ts and
+  // lib/articles/categoriesLoader.ts) so this page stays statically
+  // prerenderable.
+  const [articles, managedCategories] = await Promise.all([
+    getPublishedArticles(),
+    getManagedArticleCategories(),
+  ]);
   const items: ArticleListItem[] = articles.map((article) => ({
     article,
     heroUrl: publicHeroImageUrl(article.hero_image_path),
     excerpt: excerptFor(article),
   }));
-  const allCategories = Array.from(
+  const inUseCategories = Array.from(
     new Set(articles.map((a) => a.category).filter((c): c is string => Boolean(c)))
-  ).sort((a, b) => a.localeCompare(b));
+  );
+  // Ordered by the admin-managed sort_order (founder decision 2026-08-06),
+  // falling back to alphabetical for any legacy/custom value that isn't in
+  // the managed list — lib/articles/categoryAdmin.ts's
+  // orderCategoriesForPublicFilter is pure/unit-tested.
+  const allCategories = orderCategoriesForPublicFilter(inUseCategories, managedCategories);
 
   return (
     <>

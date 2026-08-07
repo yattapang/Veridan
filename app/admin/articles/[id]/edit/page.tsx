@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { articleHeroImagePublicUrl } from "@/lib/storage";
 import { siteMeta } from "@/lib/site-content";
+import { getManagedArticleCategoriesForEditor } from "@/lib/articles/categoriesLoader";
 import type { ArticleRow } from "@/lib/supabase/types";
 import { InstructiveMessage } from "@/components/admin/InstructiveMessage";
 import { ArticleEditor } from "./ArticleEditor";
@@ -43,6 +44,14 @@ export default async function EditArticlePage({ params }: { params: Promise<{ id
 
   const heroImageUrl = articleHeroImagePublicUrl(supabase, data.hero_image_path);
   const publicUrl = `${siteMeta.siteUrl}/articles/${data.slug}`;
+  const categories = await getManagedArticleCategoriesForEditor(supabase);
 
-  return <ArticleEditor article={data} heroImageUrl={heroImageUrl} publicUrl={publicUrl} />;
+  return (
+    <ArticleEditor
+      article={data}
+      heroImageUrl={heroImageUrl}
+      publicUrl={publicUrl}
+      categories={categories}
+    />
+  );
 }

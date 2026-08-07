@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useActionState, useState, useTransition } from "react";
-import { SUGGESTED_ARTICLE_CATEGORIES } from "@/lib/articles/categories";
+import { buildCategoryOptions } from "@/lib/articles/categoryAdmin";
+import type { ManagedArticleCategory } from "@/lib/articles/categoriesLoader";
 import { renderMarkdownToSafeHtml } from "@/lib/articles/markdown";
 import type { ArticleRow, ArticleStatus } from "@/lib/supabase/types";
 import {
@@ -13,6 +14,7 @@ import {
   saveArticleFields,
   type ArticleActionResult,
 } from "../../actions";
+import { createArticleCategoryInline, type CategoryQuickCreateResult } from "../../categories/actions";
 import { AiAssistPanel } from "./AiAssistPanel";
 import { HeroImageUploader } from "./HeroImageUploader";
 import { LinkedinCopyButton } from "./LinkedinCopyButton";
@@ -119,10 +121,12 @@ export function ArticleEditor({
   article,
   heroImageUrl,
   publicUrl,
+  categories,
 }: {
   article: ArticleRow;
   heroImageUrl: string | null;
   publicUrl: string;
+  categories: ManagedArticleCategory[];
 }) {
   const [state, formAction, pending] = useActionState(
     saveArticleFields.bind(null, article.id),
@@ -132,6 +136,51 @@ export function ArticleEditor({
   const [body, setBody] = useState(article.body ?? "");
   const [showPreview, setShowPreview] = useState(false);
   const [everAiAssisted, setEverAiAssisted] = useState(article.ai_assisted);
+
+  // Managed category select fed by the article_categories table, PLUS the
+  // ability to keep a custom/legacy value (founder decision 2026-08-06) —
+  // if article.category isn't among the managed categories,
+  // buildCategoryOptions appends it as a labelled "custom" option so saving
+  // never silently changes it. Inline "+ New category" quick-create mirrors
+  // app/admin/products/ProductForm.tsx's item-group pattern (Task 31): kept
+  // local to this form instance since it needs to write the newly created
+  // category's name straight into this form's select, and newly created
+  // categories are tracked separately and merged with the server-provided
+  // `categories` at render time so one created moments ago shows up before
+  // the next server round-trip refreshes `categories`.
+  const [locallyCreatedCategories, setLocallyCreatedCategories] = useState<ManagedArticleCategory[]>(
+    []
+  );
+  const [selectedCategory, setSelectedCategory] = useState(article.category ?? "");
+  const [creatingCategory, setCreatingCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [categoryError, setCategoryError] = useState<string | null>(null);
+  const [categoryPending, startCategoryTransition] = useTransition();
+
+  const knownCategoryIds = new Set(categories.map((c) => c.id));
+  const mergedCategories = [
+    ...categories,
+    ...locallyCreatedCategories.filter((c) => !knownCategoryIds.has(c.id)),
+  ];
+  const categoryOptions = buildCategoryOptions(mergedCategories, selectedCategory);
+
+  function handleCreateCategory() {
+    setCategoryError(null);
+    startCategoryTransition(async () => {
+      const result: CategoryQuickCreateResult = await createArticleCategoryInline(newCategoryName);
+      if (!result.ok) {
+        setCategoryError(result.error);
+        return;
+      }
+      setLocallyCreatedCategories((prev) => [
+        ...prev,
+        { id: result.id, name: result.name, slug: result.slug, description: null, sort_order: 0 },
+      ]);
+      setSelectedCategory(result.name);
+      setNewCategoryName("");
+      setCreatingCategory(false);
+    });
+  }
 
   return (
     <div className="max-w-4xl">
@@ -197,22 +246,75 @@ export function ArticleEditor({
         </div>
 
         <div>
-          <label className={labelClass} htmlFor="category">
-            Category
-          </label>
-          <input
+          <div className="flex items-center justify-between">
+            <label className={labelClass} htmlFor="category">
+              Category
+            </label>
+            <Link
+              href="/admin/articles/categories"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[11px] font-medium text-veridan-accent-text underline underline-offset-2 hover:text-veridan-ink"
+            >
+              Manage categories
+            </Link>
+          </div>
+          <select
             id="category"
             name="category"
-            list="category-suggestions"
-            defaultValue={article.category ?? ""}
-            placeholder="Pick a suggestion or type your own"
+            value={selectedCategory}
+            onChange={(e) => setSelectedCategory(e.target.value)}
             className={`${inputClass} mt-1`}
-          />
-          <datalist id="category-suggestions">
-            {SUGGESTED_ARTICLE_CATEGORIES.map((c) => (
-              <option key={c} value={c} />
+          >
+            <option value="">— none —</option>
+            {categoryOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
             ))}
-          </datalist>
+          </select>
+          {!creatingCategory ? (
+            <button
+              type="button"
+              onClick={() => setCreatingCategory(true)}
+              className="mt-1 text-xs font-medium text-veridan-accent underline underline-offset-2 hover:text-veridan-accent-soft"
+            >
+              + New category
+            </button>
+          ) : (
+            <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-veridan-warm-gray-light bg-veridan-warm-gray-pale p-2">
+              <input
+                type="text"
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+                placeholder="Category name"
+                className={`${inputClass} max-w-[14rem]`}
+              />
+              <button
+                type="button"
+                onClick={handleCreateCategory}
+                disabled={categoryPending || !newCategoryName.trim()}
+                className="rounded-md bg-veridan-ink px-3 py-2 text-xs font-medium uppercase tracking-wide text-veridan-paper disabled:opacity-50"
+              >
+                {categoryPending ? "Creating…" : "Create"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCreatingCategory(false);
+                  setCategoryError(null);
+                }}
+                className="text-xs text-veridan-warm-gray underline underline-offset-2 hover:text-veridan-ink"
+              >
+                Cancel
+              </button>
+              {categoryError && (
+                <p role="alert" className="w-full text-xs text-red-600">
+                  {categoryError}
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         <div>
