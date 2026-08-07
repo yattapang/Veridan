@@ -61,10 +61,10 @@ export default async function AboutPage() {
       <section className="py-20 sm:py-28">
         <Container className="grid gap-10 sm:grid-cols-3">
           <div>
-            <p className="text-3xl font-semibold text-veridan-accent">JM · CA</p>
+            <p className="text-3xl font-semibold text-veridan-accent">KINGSTON</p>
             <p className="mt-2 text-sm text-veridan-warm-gray">
-              Dual Jamaican-Canadian citizenship enabling direct, hands-on
-              multi-origin logistics.
+              A Jamaican specialist on the ground — accountable from
+              specification through to site.
             </p>
           </div>
           <div>
