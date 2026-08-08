@@ -13,6 +13,16 @@
  * to existing values (native browser behavior) while still allowing any
  * new value, exactly like a plain text input.
  *
+ * `finish_code` describes the SUPPLIED finish, not the specified one
+ * (founder feedback 2026-08-07: "the finish code cell, does it refer to
+ * the specified or supplied finish code" — the products library records
+ * what can actually be bought/shipped, so the code is an attribute of
+ * `supplied_finish`; `specified_finish` is a project requirement, not a
+ * product attribute). The admin UI labels the field "Supplied finish
+ * code" accordingly (app/admin/products/ProductForm.tsx and friends);
+ * this module's field name stays `finishCodes`/`finish_code` unchanged —
+ * this is a display-label clarification only, not a schema change.
+ *
  * Kept dependency-free (no Supabase client) so the dedup/sort logic is
  * unit-testable in isolation.
  */

@@ -564,7 +564,7 @@ export default async function QuoteBuilderPage({
                   type="text"
                   name="finish_code"
                   defaultValue={pFinishCode}
-                  placeholder="Finish code (US32D…)"
+                  placeholder="Supplied finish code (US32D…)"
                   className="w-full rounded-md border border-veridan-warm-gray-light bg-white px-3 py-2 text-sm text-veridan-ink focus:border-veridan-accent focus:outline-none"
                 />
                 <button

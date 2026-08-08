@@ -24,6 +24,12 @@ function formatDate(iso: string) {
  * unit_cost, cost_currency, and last-updated date side by side — the
  * direct answer to "an item of a particular grade may have multiple
  * suppliers... we need to filter these."
+ *
+ * finish_code is labelled "Supplied finish code" here (founder feedback
+ * 2026-08-07: "the finish code cell, does it refer to the specified or
+ * supplied finish code" — resolved: it describes the SUPPLIED finish,
+ * i.e. what a given offering will actually ship as, which is exactly what
+ * this view is grouping/comparing offerings by).
  */
 export default async function CompareOfferingsPage({ params }: { params: Promise<{ groupId: string }> }) {
   const { groupId } = await params;
@@ -86,7 +92,8 @@ export default async function CompareOfferingsPage({ params }: { params: Promise
         {itemGroup.grade ? ` — ${itemGroup.grade}` : ""}
       </h1>
       <p className="mt-2 text-sm text-veridan-warm-gray">
-        {products.length} active offering{products.length === 1 ? "" : "s"} of this item, grouped by finish.
+        {products.length} active offering{products.length === 1 ? "" : "s"} of this item, grouped by supplied
+        finish code.
       </p>
 
       {products.length === 0 ? (
@@ -100,7 +107,7 @@ export default async function CompareOfferingsPage({ params }: { params: Promise
         Array.from(groups.entries()).map(([finish, group]) => (
           <section key={finish} className="mt-8">
             <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">
-              Finish: {finish}
+              Supplied finish code: {finish}
             </h2>
             <div className="overflow-x-auto rounded-md border border-veridan-warm-gray-light bg-white">
               <table className="w-full text-left text-sm">

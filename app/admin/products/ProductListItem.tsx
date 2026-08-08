@@ -97,7 +97,7 @@ export function ProductListItem({
             {product.item_groups
               ? `${product.item_groups.family_name}${product.item_groups.grade ? ` (${product.item_groups.grade})` : ""}`
               : ""}
-            {product.finish_code ? ` · finish ${product.finish_code}` : ""}
+            {product.finish_code ? ` · supplied finish code ${product.finish_code}` : ""}
             {product.design_series ? ` · ${product.design_series}` : ""}
           </p>
         )}

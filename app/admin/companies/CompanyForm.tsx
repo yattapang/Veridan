@@ -4,7 +4,9 @@ import Link from "next/link";
 import { useActionState, useEffect, useRef, useState, useTransition } from "react";
 import type { CompanyRow } from "@/lib/supabase/types";
 import { buildTaxonomyOptions } from "@/lib/taxonomies/taxonomyAdmin";
+import { mergeLocallyCreated } from "@/lib/admin/creatableSelect";
 import type { ManagedCompanyType } from "@/lib/companies/typesLoader";
+import { CreatableSelect, InlineCreatePanel } from "@/components/admin/CreatableSelect";
 import {
   createCompany,
   updateCompany,
@@ -29,9 +31,11 @@ const labelClass = "block text-xs font-medium uppercase tracking-wide text-verid
  * unreachable/empty), read by the server component and passed down here.
  * Founder feedback 2026-08-07 ("the company type does not allow the admin
  * to edit, create, or delete company types") — the Type picker now offers
- * an inline "+ New type" quick-create, mirroring
- * app/admin/products/ProductForm.tsx's item-group pattern (Task 31). If
- * `company.type` holds a legacy value not in the managed list,
+ * an inline quick-create via CreatableSelect's trailing "+ Create new
+ * company type" option (components/admin/CreatableSelect.tsx), per the
+ * founder's follow-up feedback the same day that the create affordance
+ * should live INSIDE the dropdown, as its last option, rather than beside
+ * it. If `company.type` holds a legacy value not in the managed list,
  * buildTaxonomyOptions appends it as a labelled "custom" option so saving
  * never silently changes it.
  */
@@ -59,8 +63,7 @@ export function CompanyForm({
   const [typeError, setTypeError] = useState<string | null>(null);
   const [typePending, startTypeTransition] = useTransition();
 
-  const knownTypeIds = new Set(companyTypes.map((t) => t.id));
-  const mergedTypes = [...companyTypes, ...locallyCreatedTypes.filter((t) => !knownTypeIds.has(t.id))];
+  const mergedTypes = mergeLocallyCreated(companyTypes, locallyCreatedTypes);
   const typeOptions = buildTaxonomyOptions(mergedTypes, selectedType);
 
   useEffect(() => {
@@ -118,60 +121,36 @@ export function CompanyForm({
             Manage types
           </Link>
         </div>
-        <select
+        <CreatableSelect
           id={`type-${idSuffix}`}
           name="type"
           value={selectedType}
-          onChange={(e) => setSelectedType(e.target.value)}
-          className={`${inputClass} mt-1`}
-        >
-          {typeOptions.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-        {!creatingType ? (
-          <button
-            type="button"
-            onClick={() => setCreatingType(true)}
-            className="mt-1 text-xs font-medium text-veridan-accent underline underline-offset-2 hover:text-veridan-accent-soft"
+          options={typeOptions}
+          onChange={setSelectedType}
+          onRequestCreate={() => setCreatingType(true)}
+          createOptionLabel="+ Create new company type"
+        />
+        {creatingType && (
+          <InlineCreatePanel
+            onCancel={() => {
+              setCreatingType(false);
+              setTypeError(null);
+            }}
+            onSubmit={handleCreateType}
+            pending={typePending}
+            error={typeError}
+            submitDisabled={!newTypeLabel.trim()}
           >
-            + New type
-          </button>
-        ) : (
-          <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-veridan-warm-gray-light bg-veridan-warm-gray-pale p-2">
             <input
               type="text"
               value={newTypeLabel}
               onChange={(e) => setNewTypeLabel(e.target.value)}
               placeholder="Type label"
+              aria-label="New company type label"
+              autoFocus
               className={`${inputClass} max-w-[12rem]`}
             />
-            <button
-              type="button"
-              onClick={handleCreateType}
-              disabled={typePending || !newTypeLabel.trim()}
-              className="rounded-md bg-veridan-ink px-3 py-2 text-xs font-medium uppercase tracking-wide text-veridan-paper disabled:opacity-50"
-            >
-              {typePending ? "Creating…" : "Create"}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setCreatingType(false);
-                setTypeError(null);
-              }}
-              className="text-xs text-veridan-warm-gray underline underline-offset-2 hover:text-veridan-ink"
-            >
-              Cancel
-            </button>
-            {typeError && (
-              <p role="alert" className="w-full text-xs text-red-600">
-                {typeError}
-              </p>
-            )}
-          </div>
+          </InlineCreatePanel>
         )}
       </div>
 

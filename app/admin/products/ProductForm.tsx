@@ -10,6 +10,8 @@ import {
   type SupplierRow,
 } from "@/lib/supabase/types";
 import { buildTaxonomyOptions } from "@/lib/taxonomies/taxonomyAdmin";
+import { mergeLocallyCreated } from "@/lib/admin/creatableSelect";
+import { CreatableSelect, InlineCreatePanel } from "@/components/admin/CreatableSelect";
 import type { ManagedProductCategory } from "@/lib/products/categoriesLoader";
 import type { DistinctFinishValues } from "@/lib/products/finishes";
 import {
@@ -36,9 +38,12 @@ const labelClass = "block text-xs font-medium uppercase tracking-wide text-verid
  * when the table is unreachable/empty), read by the server component and
  * passed down here. Founder feedback 2026-08-07 ("Product Category should
  * also allow addition of New Categories in the drop down") — the Category
- * picker now offers an inline "+ New category" quick-create, exactly like
- * the item-group picker below it (Task 31). `distinctFinishes` is the set
- * of every distinct value already used for the three finish fields,
+ * picker offers an inline quick-create via CreatableSelect's trailing
+ * "+ Create new category" option, exactly like the item-group picker
+ * below it (Task 31, updated the same day per the founder's follow-up
+ * that every such affordance belongs INSIDE the dropdown as its last
+ * option — see lib/admin/creatableSelect.ts). `distinctFinishes` is the
+ * set of every distinct value already used for the three finish fields,
  * server-loaded (lib/products/finishes.ts), for the datalist type-aheads.
  */
 export function ProductForm({
@@ -79,11 +84,7 @@ export function ProductForm({
   const [categoryError, setCategoryError] = useState<string | null>(null);
   const [categoryPending, startCategoryTransition] = useTransition();
 
-  const knownCategoryIds = new Set(productCategories.map((c) => c.id));
-  const mergedCategories = [
-    ...productCategories,
-    ...locallyCreatedCategories.filter((c) => !knownCategoryIds.has(c.id)),
-  ];
+  const mergedCategories = mergeLocallyCreated(productCategories, locallyCreatedCategories);
   const categoryOptions = buildTaxonomyOptions(mergedCategories, selectedCategory);
 
   function handleCreateCategory() {
@@ -119,8 +120,7 @@ export function ProductForm({
   const [groupError, setGroupError] = useState<string | null>(null);
   const [groupPending, startGroupTransition] = useTransition();
 
-  const knownIds = new Set(itemGroups.map((g) => g.id));
-  const groups = [...itemGroups, ...locallyCreatedGroups.filter((g) => !knownIds.has(g.id))];
+  const groups = mergeLocallyCreated(itemGroups, locallyCreatedGroups);
 
   useEffect(() => {
     if (wasPending.current && !pending && state.ok) {
@@ -186,60 +186,36 @@ export function ProductForm({
             Manage categories
           </Link>
         </div>
-        <select
+        <CreatableSelect
           id={`category-${idSuffix}`}
           name="generic_category"
           value={selectedCategory}
-          onChange={(e) => setSelectedCategory(e.target.value)}
-          className={`${inputClass} mt-1`}
-        >
-          {categoryOptions.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-        {!creatingCategory ? (
-          <button
-            type="button"
-            onClick={() => setCreatingCategory(true)}
-            className="mt-1 text-xs font-medium text-veridan-accent underline underline-offset-2 hover:text-veridan-accent-soft"
+          options={categoryOptions}
+          onChange={setSelectedCategory}
+          onRequestCreate={() => setCreatingCategory(true)}
+          createOptionLabel="+ Create new category"
+        />
+        {creatingCategory && (
+          <InlineCreatePanel
+            onCancel={() => {
+              setCreatingCategory(false);
+              setCategoryError(null);
+            }}
+            onSubmit={handleCreateCategory}
+            pending={categoryPending}
+            error={categoryError}
+            submitDisabled={!newCategoryLabel.trim()}
           >
-            + New category
-          </button>
-        ) : (
-          <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-veridan-warm-gray-light bg-veridan-warm-gray-pale p-2">
             <input
               type="text"
               value={newCategoryLabel}
               onChange={(e) => setNewCategoryLabel(e.target.value)}
               placeholder="Category name"
+              aria-label="New category name"
+              autoFocus
               className={`${inputClass} max-w-[12rem]`}
             />
-            <button
-              type="button"
-              onClick={handleCreateCategory}
-              disabled={categoryPending || !newCategoryLabel.trim()}
-              className="rounded-md bg-veridan-ink px-3 py-2 text-xs font-medium uppercase tracking-wide text-veridan-paper disabled:opacity-50"
-            >
-              {categoryPending ? "Creating…" : "Create"}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setCreatingCategory(false);
-                setCategoryError(null);
-              }}
-              className="text-xs text-veridan-warm-gray underline underline-offset-2 hover:text-veridan-ink"
-            >
-              Cancel
-            </button>
-            {categoryError && (
-              <p role="alert" className="w-full text-xs text-red-600">
-                {categoryError}
-              </p>
-            )}
-          </div>
+          </InlineCreatePanel>
         )}
       </div>
 
@@ -287,23 +263,32 @@ export function ProductForm({
         Finish group (founder feedback 2026-08-07: "the specified finish,
         and the finish code are not side by side or not intuitive" +
         "the finish should allow drop down options that when typed data
-        is entered if it already exists then it is filtered"). All three
-        finish-related fields — specified_finish (what the architect's
-        schedule calls for), supplied_finish (what will actually ship),
-        finish_code (the short BHMA code) — are grouped together, side by
-        side, in this labelled fieldset, in that order. Each is a plain
-        text input with a native HTML <datalist> type-ahead
-        (list={id}-list) populated from every DISTINCT value already used
-        for that column across the Hardware Library (server-loaded by
-        app/admin/products/page.tsx via lib/products/finishes.ts's
-        collectDistinctFinishValues) — typing filters to existing values
-        (native browser behavior) while still allowing any new value.
+        is entered if it already exists then it is filtered"). Each of the
+        three finish-related fields is a plain text input with a native
+        HTML <datalist> type-ahead (list={id}-list) populated from every
+        DISTINCT value already used for that column across the Hardware
+        Library (server-loaded by app/admin/products/page.tsx via
+        lib/products/finishes.ts's collectDistinctFinishValues) — typing
+        filters to existing values (native browser behavior) while still
+        allowing any new value.
+
+        Founder follow-up feedback 2026-08-07 ("the finish code cell, does
+        it refer to the specified or supplied finish code. i am unsure
+        what it represents") — RESOLVED: finish_code describes the
+        SUPPLIED finish (the products library records what you can
+        actually buy/ship; the specified finish is a requirement on a
+        project, not an attribute of the product catalogue). This is a
+        labelling/layout fix only — the column is still `finish_code` in
+        the database, just relabelled "Supplied finish code" everywhere it
+        appears in the admin and grouped directly under Supplied finish
+        (in its own shaded sub-box) so the association reads as obvious,
+        with Specified finish visually separated in its own column.
       */}
       <fieldset className="sm:col-span-2 rounded-md border border-veridan-warm-gray-light p-3">
         <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-veridan-warm-gray">
           Finish
         </legend>
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <label className={labelClass} htmlFor={`specified-finish-${idSuffix}`}>
               Specified finish
@@ -325,7 +310,7 @@ export function ProductForm({
             <p className="mt-1 text-[11px] text-veridan-warm-gray">What the architect&apos;s schedule calls for.</p>
           </div>
 
-          <div>
+          <div className="rounded-md border border-veridan-warm-gray-light bg-veridan-warm-gray-pale/50 p-3">
             <label className={labelClass} htmlFor={`supplied-finish-${idSuffix}`}>
               Supplied finish
             </label>
@@ -343,12 +328,9 @@ export function ProductForm({
                 <option key={v} value={v} />
               ))}
             </datalist>
-            <p className="mt-1 text-[11px] text-veridan-warm-gray">What will actually ship.</p>
-          </div>
 
-          <div>
-            <label className={labelClass} htmlFor={`finish-code-${idSuffix}`}>
-              Finish code
+            <label className={`${labelClass} mt-3 block`} htmlFor={`finish-code-${idSuffix}`}>
+              Supplied finish code
             </label>
             <input
               id={`finish-code-${idSuffix}`}
@@ -364,7 +346,9 @@ export function ProductForm({
                 <option key={v} value={v} />
               ))}
             </datalist>
-            <p className="mt-1 text-[11px] text-veridan-warm-gray">Short BHMA code, e.g. US32D.</p>
+            <p className="mt-1 text-[11px] text-veridan-warm-gray">
+              What will actually ship — the code (e.g. US32D) is used for filtering and comparing products.
+            </p>
           </div>
         </div>
       </fieldset>
@@ -392,36 +376,37 @@ export function ProductForm({
         <label className={labelClass} htmlFor={`item-group-${idSuffix}`}>
           Item group
         </label>
-        <select
+        <CreatableSelect
           id={`item-group-${idSuffix}`}
           name="item_group_id"
           value={selectedGroupId}
-          onChange={(e) => setSelectedGroupId(e.target.value)}
-          className={`${inputClass} mt-1`}
-        >
-          <option value="">— ungrouped —</option>
-          {groups.map((g) => (
-            <option key={g.id} value={g.id}>
-              {g.family_name}
-              {g.grade ? ` (${g.grade})` : ""}
-            </option>
-          ))}
-        </select>
-        {!creatingGroup ? (
-          <button
-            type="button"
-            onClick={() => setCreatingGroup(true)}
-            className="mt-1 text-xs font-medium text-veridan-accent underline underline-offset-2 hover:text-veridan-accent-soft"
+          options={groups.map((g) => ({
+            value: g.id,
+            label: `${g.family_name}${g.grade ? ` (${g.grade})` : ""}`,
+          }))}
+          onChange={setSelectedGroupId}
+          onRequestCreate={() => setCreatingGroup(true)}
+          createOptionLabel="+ Create new item group"
+          leadingOption={{ value: "", label: "— ungrouped —" }}
+        />
+        {creatingGroup && (
+          <InlineCreatePanel
+            onCancel={() => {
+              setCreatingGroup(false);
+              setGroupError(null);
+            }}
+            onSubmit={handleCreateGroup}
+            pending={groupPending}
+            error={groupError}
+            submitDisabled={!newGroupName.trim()}
           >
-            + New item group
-          </button>
-        ) : (
-          <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-veridan-warm-gray-light bg-veridan-warm-gray-pale p-2">
             <input
               type="text"
               value={newGroupName}
               onChange={(e) => setNewGroupName(e.target.value)}
               placeholder="Family name"
+              aria-label="New item group family name"
+              autoFocus
               className={`${inputClass} max-w-[12rem]`}
             />
             <select
@@ -437,30 +422,7 @@ export function ProductForm({
                 </option>
               ))}
             </select>
-            <button
-              type="button"
-              onClick={handleCreateGroup}
-              disabled={groupPending || !newGroupName.trim()}
-              className="rounded-md bg-veridan-ink px-3 py-2 text-xs font-medium uppercase tracking-wide text-veridan-paper disabled:opacity-50"
-            >
-              {groupPending ? "Creating…" : "Create"}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setCreatingGroup(false);
-                setGroupError(null);
-              }}
-              className="text-xs text-veridan-warm-gray underline underline-offset-2 hover:text-veridan-ink"
-            >
-              Cancel
-            </button>
-            {groupError && (
-              <p role="alert" className="w-full text-xs text-red-600">
-                {groupError}
-              </p>
-            )}
-          </div>
+          </InlineCreatePanel>
         )}
       </div>
 

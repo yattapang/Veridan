@@ -259,7 +259,7 @@ export default async function HardwareSetDetailPage({
             type="text"
             name="finish_code"
             defaultValue={pFinishCode}
-            placeholder="Finish code (US32D…)"
+            placeholder="Supplied finish code (US32D…)"
             className={inputClass}
           />
           <button

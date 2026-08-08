@@ -1,8 +1,11 @@
 "use client";
 
-import { useActionState, useEffect, useRef } from "react";
+import { useActionState, useEffect, useRef, useState, useTransition } from "react";
 import type { ExpenseCategoryRow, ExpenseRow } from "@/lib/expenses/types";
+import { mergeLocallyCreated } from "@/lib/admin/creatableSelect";
+import { CreatableSelect, InlineCreatePanel } from "@/components/admin/CreatableSelect";
 import { createExpense, updateExpense, type ExpenseActionResult } from "./actions";
+import { createExpenseCategoryInline } from "./categories/actions";
 
 const initialResult: ExpenseActionResult = { ok: true };
 
@@ -16,6 +19,16 @@ const primaryButtonClass =
  * Shared create/edit form for an operating expense — `expense` present means
  * edit mode, absent means the "record an expense" form (same create-vs-edit
  * convention as app/admin/articles/categories/CategoryForm.tsx).
+ *
+ * The Category picker offers an inline quick-create via CreatableSelect's
+ * trailing "+ Create new category" option (founder feedback 2026-08-07 —
+ * see lib/admin/creatableSelect.ts's header — every "create a new X"
+ * affordance belongs as the LAST OPTION of its dropdown), reusing the same
+ * createExpenseCategoryInline action the admin's expense-categories page
+ * itself is built on. Categories created inline are tracked separately and
+ * merged with the server-provided `categories` prop at render time so one
+ * created moments ago is selectable immediately, without waiting on the
+ * next server round-trip — same pattern as ProductForm's item-group picker.
  *
  * The two date fields are the load-bearing ones and are labelled to say so:
  * "Date incurred" drives the accrual-basis statements, "Date paid" drives
@@ -38,17 +51,59 @@ export function ExpenseForm({
   const formRef = useRef<HTMLFormElement>(null);
   const wasPending = useRef(false);
 
+  const [locallyCreatedCategories, setLocallyCreatedCategories] = useState<ExpenseCategoryRow[]>([]);
+  const [selectedCategoryId, setSelectedCategoryId] = useState(expense?.expense_category_id ?? "");
+  const [creatingCategory, setCreatingCategory] = useState(false);
+  const [newCategoryLabel, setNewCategoryLabel] = useState("");
+  const [categoryError, setCategoryError] = useState<string | null>(null);
+  const [categoryPending, startCategoryTransition] = useTransition();
+
+  const mergedCategories = mergeLocallyCreated(categories, locallyCreatedCategories);
+
+  function handleCreateCategory() {
+    setCategoryError(null);
+    startCategoryTransition(async () => {
+      const result = await createExpenseCategoryInline(newCategoryLabel);
+      if (!result.ok) {
+        setCategoryError(result.error);
+        return;
+      }
+      setLocallyCreatedCategories((prev) => [
+        ...prev,
+        {
+          id: result.id,
+          name: result.name,
+          label: result.label,
+          description: null,
+          sort_order: 0,
+          created_at: "",
+          updated_at: "",
+        },
+      ]);
+      setSelectedCategoryId(result.id);
+      setNewCategoryLabel("");
+      setCreatingCategory(false);
+    });
+  }
+
   // On a successful save: clear the create form so the next expense can be
   // typed straight away, or close the inline editor. Watching the
   // pending→settled edge (rather than `state` alone) is what distinguishes a
   // completed submit from the initial render, whose state is also `ok`.
+  // `onSaved` and the field resets both run unconditionally (rather than
+  // branching on `expense`): in edit mode onSaved unmounts this form
+  // (ExpenseListItem flips `editing` back to false), so the reset calls
+  // that follow are harmless no-ops on their way out; in create mode
+  // `onSaved` is simply undefined.
   useEffect(() => {
     if (wasPending.current && !pending && state.ok) {
-      if (expense) onSaved?.();
-      else formRef.current?.reset();
+      onSaved?.();
+      formRef.current?.reset();
+      setSelectedCategoryId("");
+      setLocallyCreatedCategories([]);
     }
     wasPending.current = pending;
-  }, [pending, state.ok, expense, onSaved]);
+  }, [pending, state.ok, onSaved]);
 
   return (
     <form ref={formRef} action={formAction} className="grid gap-3 sm:grid-cols-6">
@@ -56,22 +111,39 @@ export function ExpenseForm({
         <label className={labelClass} htmlFor={`expense-category-${idSuffix}`}>
           Category
         </label>
-        <select
+        <CreatableSelect
           id={`expense-category-${idSuffix}`}
           name="expense_category_id"
           required
-          defaultValue={expense?.expense_category_id ?? ""}
-          className={`${inputClass} mt-1`}
-        >
-          <option value="" disabled>
-            Choose…
-          </option>
-          {categories.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.label}
-            </option>
-          ))}
-        </select>
+          value={selectedCategoryId}
+          options={mergedCategories.map((c) => ({ value: c.id, label: c.label }))}
+          onChange={setSelectedCategoryId}
+          onRequestCreate={() => setCreatingCategory(true)}
+          createOptionLabel="+ Create new category"
+          leadingOption={{ value: "", label: "Choose…", disabled: true }}
+        />
+        {creatingCategory && (
+          <InlineCreatePanel
+            onCancel={() => {
+              setCreatingCategory(false);
+              setCategoryError(null);
+            }}
+            onSubmit={handleCreateCategory}
+            pending={categoryPending}
+            error={categoryError}
+            submitDisabled={!newCategoryLabel.trim()}
+          >
+            <input
+              type="text"
+              value={newCategoryLabel}
+              onChange={(e) => setNewCategoryLabel(e.target.value)}
+              placeholder="Category name"
+              aria-label="New expense category name"
+              autoFocus
+              className={`${inputClass} max-w-[12rem]`}
+            />
+          </InlineCreatePanel>
+        )}
       </div>
 
       <div className="sm:col-span-4">

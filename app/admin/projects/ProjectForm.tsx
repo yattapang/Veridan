@@ -2,6 +2,8 @@
 
 import { useActionState, useEffect, useRef, useState, useTransition } from "react";
 import { COMPANY_TYPES, PROJECT_TYPES, type CompanyRow } from "@/lib/supabase/types";
+import { mergeLocallyCreated } from "@/lib/admin/creatableSelect";
+import { CreatableSelect, InlineCreatePanel } from "@/components/admin/CreatableSelect";
 import { createProject, type ProjectFormResult } from "./actions";
 import { createCompanyInline } from "./companyQuickCreate";
 
@@ -29,13 +31,15 @@ export function ProjectForm({ companies }: { companies: CompanyRow[] }) {
   const formRef = useRef<HTMLFormElement>(null);
   const wasPending = useRef(false);
 
-  // Inline "+ New company" quick-create (founder-reported: the Company
-  // cell only offered existing companies). Kept local to this form
-  // instance, same shape as ProductForm's item-group inline quick-create —
-  // companies created here are tracked separately and merged with the
-  // server-provided `companies` prop at render time so a company created
-  // moments ago is selectable immediately, without waiting on the next
-  // server round-trip.
+  // Inline "+ Create new company" quick-create, as the LAST OPTION of the
+  // Company dropdown (founder feedback 2026-08-07 — see
+  // lib/admin/creatableSelect.ts's header for the verbatim quote; this
+  // was previously a separate "+ New company" button beside the select).
+  // Kept local to this form instance, same shape as ProductForm's
+  // item-group inline quick-create — companies created here are tracked
+  // separately and merged with the server-provided `companies` prop at
+  // render time so a company created moments ago is selectable
+  // immediately, without waiting on the next server round-trip.
   const [locallyCreatedCompanies, setLocallyCreatedCompanies] = useState<CompanyRow[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState("");
   const [creatingCompany, setCreatingCompany] = useState(false);
@@ -44,11 +48,7 @@ export function ProjectForm({ companies }: { companies: CompanyRow[] }) {
   const [companyError, setCompanyError] = useState<string | null>(null);
   const [companyPending, startCompanyTransition] = useTransition();
 
-  const knownCompanyIds = new Set(companies.map((c) => c.id));
-  const allCompanies = [
-    ...companies,
-    ...locallyCreatedCompanies.filter((c) => !knownCompanyIds.has(c.id)),
-  ];
+  const allCompanies = mergeLocallyCreated(companies, locallyCreatedCompanies);
 
   useEffect(() => {
     if (wasPending.current && !pending && state.ok) {
@@ -100,39 +100,35 @@ export function ProjectForm({ companies }: { companies: CompanyRow[] }) {
         <label className={labelClass} htmlFor="project-company">
           Company
         </label>
-        <select
+        <CreatableSelect
           id="project-company"
           name="company_id"
           required
           value={selectedCompanyId}
-          onChange={(e) => setSelectedCompanyId(e.target.value)}
-          className={`${inputClass} mt-1`}
-        >
-          <option value="" disabled>
-            Choose a company…
-          </option>
-          {allCompanies.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-        {!creatingCompany ? (
-          <button
-            type="button"
-            onClick={() => setCreatingCompany(true)}
-            className="mt-1 text-xs font-medium text-veridan-accent underline underline-offset-2 hover:text-veridan-accent-soft"
+          options={allCompanies.map((c) => ({ value: c.id, label: c.name }))}
+          onChange={setSelectedCompanyId}
+          onRequestCreate={() => setCreatingCompany(true)}
+          createOptionLabel="+ Create new company"
+          leadingOption={{ value: "", label: "Choose a company…", disabled: true }}
+        />
+        {creatingCompany && (
+          <InlineCreatePanel
+            onCancel={() => {
+              setCreatingCompany(false);
+              setCompanyError(null);
+            }}
+            onSubmit={handleCreateCompany}
+            pending={companyPending}
+            error={companyError}
+            submitDisabled={!newCompanyName.trim()}
           >
-            + New company
-          </button>
-        ) : (
-          <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-veridan-warm-gray-light bg-veridan-warm-gray-pale p-2">
             <input
               type="text"
               value={newCompanyName}
               onChange={(e) => setNewCompanyName(e.target.value)}
               placeholder="Company name"
               aria-label="New company name"
+              autoFocus
               className={`${inputClass} max-w-[12rem]`}
             />
             <select
@@ -147,30 +143,7 @@ export function ProjectForm({ companies }: { companies: CompanyRow[] }) {
                 </option>
               ))}
             </select>
-            <button
-              type="button"
-              onClick={handleCreateCompany}
-              disabled={companyPending || !newCompanyName.trim()}
-              className="rounded-md bg-veridan-ink px-3 py-2 text-xs font-medium uppercase tracking-wide text-veridan-paper disabled:opacity-50"
-            >
-              {companyPending ? "Creating…" : "Create"}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setCreatingCompany(false);
-                setCompanyError(null);
-              }}
-              className="text-xs text-veridan-warm-gray underline underline-offset-2 hover:text-veridan-ink"
-            >
-              Cancel
-            </button>
-            {companyError && (
-              <p role="alert" className="w-full text-xs text-red-600">
-                {companyError}
-              </p>
-            )}
-          </div>
+          </InlineCreatePanel>
         )}
       </div>
 
@@ -204,7 +177,7 @@ export function ProjectForm({ companies }: { companies: CompanyRow[] }) {
         </button>
         {allCompanies.length === 0 && (
           <p className="text-xs text-veridan-warm-gray">
-            No companies yet — use “+ New company” above.
+            No companies yet — choose “+ Create new company” from the dropdown above.
           </p>
         )}
         {state.ok === false && (

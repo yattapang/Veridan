@@ -337,7 +337,7 @@ export default async function ProductsPage({
           </div>
           <div>
             <label className="block text-xs font-medium uppercase tracking-wide text-veridan-warm-gray" htmlFor="finish_code">
-              Finish code
+              Supplied finish code
             </label>
             <input
               id="finish_code"

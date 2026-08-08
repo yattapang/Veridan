@@ -152,7 +152,7 @@ function LibraryPicker({
                 <ul className="mt-2 rounded-md border border-veridan-warm-gray-light bg-white text-xs">
                   {siblings.map((s) => (
                     <li key={s.id} className="border-b border-veridan-warm-gray-light px-3 py-1.5 last:border-b-0">
-                      {s.suppliers?.name ?? "no supplier"} · {s.finish_code ?? "no finish code"} ·{" "}
+                      {s.suppliers?.name ?? "no supplier"} · {s.finish_code ?? "no supplied finish code"} ·{" "}
                       {s.cost_currency} {s.unit_cost}/{s.unit}
                     </li>
                   ))}

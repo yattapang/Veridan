@@ -6,6 +6,8 @@ import { useActionState, useState, useTransition } from "react";
 import { buildCategoryOptions } from "@/lib/articles/categoryAdmin";
 import type { ManagedArticleCategory } from "@/lib/articles/categoriesLoader";
 import { renderMarkdownToSafeHtml } from "@/lib/articles/markdown";
+import { mergeLocallyCreated } from "@/lib/admin/creatableSelect";
+import { CreatableSelect, InlineCreatePanel } from "@/components/admin/CreatableSelect";
 import type { ArticleRow, ArticleStatus } from "@/lib/supabase/types";
 import {
   moveArticleToReview,
@@ -141,13 +143,16 @@ export function ArticleEditor({
   // ability to keep a custom/legacy value (founder decision 2026-08-06) —
   // if article.category isn't among the managed categories,
   // buildCategoryOptions appends it as a labelled "custom" option so saving
-  // never silently changes it. Inline "+ New category" quick-create mirrors
-  // app/admin/products/ProductForm.tsx's item-group pattern (Task 31): kept
-  // local to this form instance since it needs to write the newly created
-  // category's name straight into this form's select, and newly created
-  // categories are tracked separately and merged with the server-provided
-  // `categories` at render time so one created moments ago shows up before
-  // the next server round-trip refreshes `categories`.
+  // never silently changes it. Inline quick-create via CreatableSelect's
+  // trailing "+ Create new category" option mirrors
+  // app/admin/products/ProductForm.tsx's item-group pattern (Task 31,
+  // updated 2026-08-07 to move the create affordance INSIDE the dropdown
+  // — see lib/admin/creatableSelect.ts): kept local to this form instance
+  // since it needs to write the newly created category's name straight
+  // into this form's select, and newly created categories are tracked
+  // separately and merged with the server-provided `categories` at render
+  // time so one created moments ago shows up before the next server
+  // round-trip refreshes `categories`.
   const [locallyCreatedCategories, setLocallyCreatedCategories] = useState<ManagedArticleCategory[]>(
     []
   );
@@ -157,11 +162,7 @@ export function ArticleEditor({
   const [categoryError, setCategoryError] = useState<string | null>(null);
   const [categoryPending, startCategoryTransition] = useTransition();
 
-  const knownCategoryIds = new Set(categories.map((c) => c.id));
-  const mergedCategories = [
-    ...categories,
-    ...locallyCreatedCategories.filter((c) => !knownCategoryIds.has(c.id)),
-  ];
+  const mergedCategories = mergeLocallyCreated(categories, locallyCreatedCategories);
   const categoryOptions = buildCategoryOptions(mergedCategories, selectedCategory);
 
   function handleCreateCategory() {
@@ -259,61 +260,37 @@ export function ArticleEditor({
               Manage categories
             </Link>
           </div>
-          <select
+          <CreatableSelect
             id="category"
             name="category"
             value={selectedCategory}
-            onChange={(e) => setSelectedCategory(e.target.value)}
-            className={`${inputClass} mt-1`}
-          >
-            <option value="">— none —</option>
-            {categoryOptions.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-          {!creatingCategory ? (
-            <button
-              type="button"
-              onClick={() => setCreatingCategory(true)}
-              className="mt-1 text-xs font-medium text-veridan-accent underline underline-offset-2 hover:text-veridan-accent-soft"
+            options={categoryOptions}
+            onChange={setSelectedCategory}
+            onRequestCreate={() => setCreatingCategory(true)}
+            createOptionLabel="+ Create new category"
+            leadingOption={{ value: "", label: "— none —" }}
+          />
+          {creatingCategory && (
+            <InlineCreatePanel
+              onCancel={() => {
+                setCreatingCategory(false);
+                setCategoryError(null);
+              }}
+              onSubmit={handleCreateCategory}
+              pending={categoryPending}
+              error={categoryError}
+              submitDisabled={!newCategoryName.trim()}
             >
-              + New category
-            </button>
-          ) : (
-            <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-veridan-warm-gray-light bg-veridan-warm-gray-pale p-2">
               <input
                 type="text"
                 value={newCategoryName}
                 onChange={(e) => setNewCategoryName(e.target.value)}
                 placeholder="Category name"
+                aria-label="New category name"
+                autoFocus
                 className={`${inputClass} max-w-[14rem]`}
               />
-              <button
-                type="button"
-                onClick={handleCreateCategory}
-                disabled={categoryPending || !newCategoryName.trim()}
-                className="rounded-md bg-veridan-ink px-3 py-2 text-xs font-medium uppercase tracking-wide text-veridan-paper disabled:opacity-50"
-              >
-                {categoryPending ? "Creating…" : "Create"}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setCreatingCategory(false);
-                  setCategoryError(null);
-                }}
-                className="text-xs text-veridan-warm-gray underline underline-offset-2 hover:text-veridan-ink"
-              >
-                Cancel
-              </button>
-              {categoryError && (
-                <p role="alert" className="w-full text-xs text-red-600">
-                  {categoryError}
-                </p>
-              )}
-            </div>
+            </InlineCreatePanel>
           )}
         </div>
 

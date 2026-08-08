@@ -30,6 +30,10 @@ import {
 
 export type ExpenseCategoryActionResult = { ok: true; error?: undefined } | { ok: false; error: string };
 
+export type ExpenseCategoryQuickCreateResult =
+  | { ok: true; id: string; name: string; label: string; error?: undefined }
+  | { ok: false; error: string };
+
 function revalidateCategoryViews() {
   revalidatePath("/admin/expenses/categories");
   revalidatePath("/admin/expenses");
@@ -43,10 +47,18 @@ async function fetchExistingCategories(
   return (data as ExpenseCategoryCandidate[] | null) ?? [];
 }
 
-export async function createExpenseCategory(
-  _prevState: ExpenseCategoryActionResult,
-  formData: FormData,
-): Promise<ExpenseCategoryActionResult> {
+// ---------------------------------------------------------------------------
+// Create — both the expense categories admin page's own form and the
+// expense form's inline "+ Create new category" quick-create (founder
+// feedback 2026-08-07 — see lib/admin/creatableSelect.ts's header) call
+// this. Mirrors app/admin/companies/types/actions.ts's
+// createCompanyType/createCompanyTypeInline split.
+// ---------------------------------------------------------------------------
+
+async function createExpenseCategoryCore(
+  label: string,
+  description: string | null,
+): Promise<ExpenseCategoryQuickCreateResult> {
   let supabase;
   try {
     supabase = await createClient();
@@ -56,9 +68,6 @@ export async function createExpenseCategory(
 
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to create a category." };
-
-  const label = String(formData.get("label") ?? "");
-  const description = String(formData.get("description") ?? "").trim();
 
   const existing = await fetchExistingCategories(supabase);
   const validated = validateNewExpenseCategory(label, existing);
@@ -75,17 +84,46 @@ export async function createExpenseCategory(
     .maybeSingle<{ sort_order: number }>();
   const nextSortOrder = (maxRow?.sort_order ?? 0) + 1;
 
-  const { error } = await supabase.from("expense_categories").insert({
-    name: validated.name,
-    label: validated.label,
-    description: description || null,
-    sort_order: nextSortOrder,
-  });
+  const { data, error } = await supabase
+    .from("expense_categories")
+    .insert({
+      name: validated.name,
+      label: validated.label,
+      description: description || null,
+      sort_order: nextSortOrder,
+    })
+    .select("id")
+    .single();
 
-  if (error) return { ok: false, error: `Could not create the category: ${error.message}` };
+  if (error || !data) {
+    return { ok: false, error: `Could not create the category: ${error?.message ?? "unknown error"}` };
+  }
 
   revalidateCategoryViews();
+  return { ok: true, id: data.id as string, name: validated.name, label: validated.label };
+}
+
+/** Full create form on /admin/expenses/categories (label + optional description). */
+export async function createExpenseCategory(
+  _prevState: ExpenseCategoryActionResult,
+  formData: FormData,
+): Promise<ExpenseCategoryActionResult> {
+  const label = String(formData.get("label") ?? "");
+  const description = String(formData.get("description") ?? "").trim();
+  const result = await createExpenseCategoryCore(label, description || null);
+  if (!result.ok) return result;
   return { ok: true };
+}
+
+/**
+ * Inline quick-create from the expense form (mirrors
+ * app/admin/companies/types/actions.ts's createCompanyTypeInline) — a
+ * founder can add an expense category without leaving the expense they're
+ * recording. Returns the new row's id/name/label so the form can select
+ * it immediately.
+ */
+export async function createExpenseCategoryInline(label: string): Promise<ExpenseCategoryQuickCreateResult> {
+  return createExpenseCategoryCore(label, null);
 }
 
 export async function renameExpenseCategory(
