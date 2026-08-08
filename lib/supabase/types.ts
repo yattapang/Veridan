@@ -11,7 +11,31 @@ export interface UserRow {
   id: string;
   email: string;
   display_name: string | null;
+  /** 'founder' | 'staff' — normalise with lib/roles/matrix.ts `normalizeRole`. */
   role: string;
+  /** false = access revoked. getCurrentUser() returns null for an inactive user. */
+  active: boolean;
+}
+
+/** A `public.users` row as the /admin/team page needs it, plus auth metadata. */
+export interface TeamUserRow extends UserRow {
+  invited_at: string | null;
+  deactivated_at: string | null;
+  created_at: string;
+}
+
+export type UserAdminAuditAction = "invite" | "role_change" | "deactivate" | "reactivate";
+
+export interface UserAdminAuditLogRow {
+  id: string;
+  target_user_id: string | null;
+  target_email: string;
+  action: UserAdminAuditAction;
+  old_value: Record<string, unknown> | null;
+  new_value: Record<string, unknown> | null;
+  changed_by: string;
+  changed_at: string;
+  reason: string | null;
 }
 
 /** The typed jsonb envelope stored in business_parameters.value (§1.14). */
