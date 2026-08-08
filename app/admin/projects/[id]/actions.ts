@@ -405,22 +405,18 @@ export async function createDoorRegisterQuote(
   // 6. Insert the origin pools and map label → id.
   const originIdByLabel = new Map<string, string>();
   if (originGroups.length > 0) {
-    const { data: insertedOrigins, error: originInsertError } = await supabase
-      .from("quote_origins")
-      .insert(
-        originGroups.map((g) => ({
-          quote_id: quoteId,
-          origin_label: g.label,
-          freight_export_fees_usd: 0,
-          ocean_freight_usd: null, // null → $1,250 freight+insurance fallback (§7.1 item 2)
-          marine_insurance_usd: null, // null → engine computes 1.5% of CIF
-          port_handling_usd: parametersSnapshot.port_handling_usd,
-          brokerage_usd: null, // null → engine computes 120 + 50×(pallets−1)
-          pallet_count: 1,
-          duty_gct_pct: parametersSnapshot.duty_gct_pct,
-        }))
-      )
-      .select("id, origin_label");
+    // Through the security-definer function, never a direct write to the
+    // now founder-only quote_origins table (20260807000004_user_roles.sql
+    // §8) — this action is staff-usable (no founder gate), and the function
+    // applies the same defaults this INSERT used to write directly:
+    // freight 0, ocean/marine/brokerage null → engine fallback formulas
+    // (§7.1 items 2–3), pallet_count 1.
+    const { data: insertedOrigins, error: originInsertError } = await supabase.rpc("quote_origins_insert", {
+      p_quote_id: quoteId,
+      p_labels: originGroups.map((g) => g.label),
+      p_port_handling_usd: parametersSnapshot.port_handling_usd,
+      p_duty_gct_pct: parametersSnapshot.duty_gct_pct,
+    });
     if (originInsertError || !insertedOrigins) {
       return { ok: false, error: `Quote ${quoteRef} was created but its origin pools failed: ${originInsertError?.message ?? "unknown error"}.` };
     }

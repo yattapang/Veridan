@@ -145,7 +145,12 @@ export default async function QuoteBuilderPage({
   }
 
   const [originsResult, linesResult, overridesResult, suppliersResult, productsResult, itemGroupsResult] = await Promise.all([
-    supabase.from("quote_origins").select("*").eq("quote_id", id).order("origin_label"),
+    // Through the security-definer function, never a direct read of the
+    // founder-only quote_origins table (20260807000004_user_roles.sql §8) —
+    // fetched for EVERY viewer (staff included) because the engine needs it
+    // to compute the client-price totals staff do see; a denied direct read
+    // would return zero rows with no error and silently zero those totals.
+    supabase.rpc("quote_origins_for_quote", { p_quote_id: id }),
     supabase
       .from("quote_line_items")
       .select(
@@ -416,11 +421,17 @@ export default async function QuoteBuilderPage({
         </div>
       )}
 
-      {/* FX snapshot */}
+      {/* FX snapshot — founder-only: bank sell rate, risk buffer and supplier
+          conversion rates are business_parameters rows frozen onto this quote
+          (20260807000004_user_roles.sql §7), and the panel's only action
+          (refresh from current parameters) already requires isDraft &&
+          showCosts, so it is useless to staff besides. */}
+      {showCosts && (
       <section className="mt-8 rounded-md border border-veridan-warm-gray-light bg-white px-5 py-5">
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">FX snapshot</h2>
         <FxSnapshotPanel quoteId={quote.id} fx={quote.fx_snapshot} isDraft={isDraft && showCosts} />
       </section>
+      )}
 
       {/* Origin cost pools — founder-only: every figure here is supplier cost. */}
       {showCosts && (

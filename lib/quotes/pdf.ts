@@ -56,7 +56,11 @@ export async function renderQuotePdf(supabase: Client, quoteId: string): Promise
   const architectCompanyId = quote.architect_company_id ?? quote.projects?.architect_company_id ?? null;
 
   const [originsResult, linesResult, architectResult] = await Promise.all([
-    supabase.from("quote_origins").select("*").eq("quote_id", quoteId).order("origin_label"),
+    // Through the security-definer function (20260807000004_user_roles.sql
+    // §8) — the "Download PDF" link is reachable by staff too (the route
+    // only checks getCurrentUser(), not founder), and a direct read of the
+    // now founder-only quote_origins table would silently return zero rows.
+    supabase.rpc("quote_origins_for_quote", { p_quote_id: quoteId }),
     supabase
       .from("quote_line_items")
       .select(

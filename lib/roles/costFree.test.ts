@@ -261,6 +261,33 @@ describe("QuoteLineRow props for a STAFF viewer", () => {
     expect(adHoc.label).toBe("Site survey");
     expect(adHoc.isAdHoc).toBe(true);
   });
+
+  it("marks the supplier name as WITHHELD, not absent, for a staff viewer", () => {
+    // QuoteLineRow.tsx renders "Supplier hidden (founder-only)" only when
+    // supplierVisible is false — this is the flag that tells a permissions
+    // withholding apart from a line that genuinely has no supplier.
+    expect(staffProps.line.supplierName).toBeNull();
+    expect(staffProps.line.supplierVisible).toBe(false);
+  });
+});
+
+describe("QuoteLineRowView.supplierVisible for a FOUNDER viewer", () => {
+  it("is true, and a real supplier name passes through", () => {
+    const view = toQuoteLineRowView(FULL_QUOTE_LINE, 1687.32, 281_500, { includeSupplierName: true });
+    expect(view.supplierVisible).toBe(true);
+    expect(view.supplierName).toBe("Consort Hardware Ltd");
+  });
+
+  it("null with supplierVisible true means the line genuinely has no supplier — QuoteLineRow renders 'No supplier', never a permissions message", () => {
+    const view = toQuoteLineRowView(
+      { ...FULL_QUOTE_LINE, supplier_id: null, suppliers: null },
+      1687.32,
+      281_500,
+      { includeSupplierName: true },
+    );
+    expect(view.supplierVisible).toBe(true);
+    expect(view.supplierName).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------

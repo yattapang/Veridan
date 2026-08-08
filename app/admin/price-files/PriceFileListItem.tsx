@@ -24,7 +24,18 @@ export function PriceFileListItem({ upload }: { upload: PriceFileUploadWithDetai
         </span>
       </td>
       <td className="px-4 py-3 text-veridan-ink">
-        {upload.suppliers?.name ?? <span className="text-veridan-warm-gray">Undetected</span>}
+        {upload.suppliers?.name ?? (
+          // upload.suppliers resolves to null BOTH when detection genuinely
+          // found nothing AND when a staff viewer's RLS-denied read of the
+          // now founder-only `suppliers` table silently returns null for the
+          // embed either way (20260807000004_user_roles.sql §6b). `supplier_id`
+          // itself lives on price_file_uploads — a staff-readable table — so
+          // it is the honest discriminator: set means a supplier WAS matched
+          // and is only withheld, not missing.
+          <span className="text-veridan-warm-gray">
+            {upload.supplier_id ? "Supplier hidden (founder-only)" : "Undetected"}
+          </span>
+        )}
       </td>
       <td className="px-4 py-3">
         <Link

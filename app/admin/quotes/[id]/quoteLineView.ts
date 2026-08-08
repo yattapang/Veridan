@@ -32,8 +32,19 @@ export interface QuoteLineRowView extends NoCostFields {
   label: string;
   /** True when there is no linked library product (ad-hoc line). */
   isAdHoc: boolean;
-  /** Null for a staff viewer — `public.suppliers` is founder-only. */
+  /**
+   * Null either because the line genuinely has no supplier, OR because the
+   * viewer is staff and `public.suppliers` is founder-only — `supplierVisible`
+   * tells the two apart so the UI never renders a permissions withholding as
+   * if it were missing data.
+   */
   supplierName: string | null;
+  /**
+   * False for a staff viewer (the name was WITHHELD, not absent) — see
+   * QuoteLineRow.tsx. True for a founder, where `supplierName === null` means
+   * the line genuinely has no supplier set.
+   */
+  supplierVisible: boolean;
   qty: number;
   clientPriceUsd: number | null;
   clientPriceJmd: number | null;
@@ -66,6 +77,7 @@ export function toQuoteLineRowView(
     label: line.products?.description ?? line.description_override ?? "Line item",
     isAdHoc: !line.product_id,
     supplierName: options.includeSupplierName ? line.suppliers?.name ?? null : null,
+    supplierVisible: options.includeSupplierName,
     qty: Number(line.qty),
     clientPriceUsd,
     clientPriceJmd,

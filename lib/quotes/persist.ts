@@ -48,8 +48,13 @@ export async function loadQuoteState(
   if (quoteError) return { state: null, error: quoteError.message };
   if (!quote) return { state: null, error: null };
 
+  // Through the security-definer function, never a direct read of the
+  // founder-only quote_origins table (20260807000004_user_roles.sql §8) — a
+  // staff session's direct SELECT would return zero rows with no error and
+  // every downstream engine computation would silently zero out shipment
+  // cost. See lib/quotes/persist.ts header note / migration §8.
   const [originsResult, linesResult] = await Promise.all([
-    supabase.from("quote_origins").select("*").eq("quote_id", quoteId).order("origin_label"),
+    supabase.rpc("quote_origins_for_quote", { p_quote_id: quoteId }),
     supabase.from("quote_line_items").select("*").eq("quote_id", quoteId).order("sort_order"),
   ]);
 
@@ -121,15 +126,15 @@ export async function persistComputed(
       .eq("id", l.lineId),
   );
 
+  // Through the security-definer function (§8) — it writes exactly these
+  // three computed-cache columns and nothing else on the founder-only row.
   const originUpdates = result.origins.map((o) =>
-    supabase
-      .from("quote_origins")
-      .update({
-        supplier_invoice_total: roundHalfUp(o.supplierInvoiceTotalUsd, 2),
-        cif_basis_usd: roundHalfUp(o.cifBasisUsd, 2),
-        total_shipment_cost_usd: roundHalfUp(o.totalShipmentCostUsd, 2),
-      })
-      .eq("id", o.originId),
+    supabase.rpc("quote_origins_update_computed", {
+      p_id: o.originId,
+      p_supplier_invoice_total: roundHalfUp(o.supplierInvoiceTotalUsd, 2),
+      p_cif_basis_usd: roundHalfUp(o.cifBasisUsd, 2),
+      p_total_shipment_cost_usd: roundHalfUp(o.totalShipmentCostUsd, 2),
+    }),
   );
 
   const results = await Promise.all([...lineUpdates, ...originUpdates]);
@@ -170,34 +175,27 @@ export async function ensureOriginForSupplier(
 ): Promise<{ originId: string | null; error: string | null }> {
   const label = supplierOriginKey(supplier);
 
-  const { data: existing, error: findError } = await supabase
-    .from("quote_origins")
-    .select("id")
-    .eq("quote_id", quoteId)
-    .eq("origin_label", label)
-    .maybeSingle();
+  // Through the security-definer functions (§8) — quote_origins is
+  // founder-only at the DB, so both the lookup and the create below go
+  // through the bridge functions rather than the table directly.
+  const { data: existingRows, error: findError } = await supabase.rpc("quote_origins_for_quote", {
+    p_quote_id: quoteId,
+  });
   if (findError) return { originId: null, error: findError.message };
-  if (existing) return { originId: existing.id as string, error: null };
+  const existing = ((existingRows as QuoteOriginRow[] | null) ?? []).find((o) => o.origin_label === label);
+  if (existing) return { originId: existing.id, error: null };
 
-  const { data: inserted, error: insertError } = await supabase
-    .from("quote_origins")
-    .insert({
-      quote_id: quoteId,
-      origin_label: label,
-      freight_export_fees_usd: 0,
-      ocean_freight_usd: null,
-      marine_insurance_usd: null,
-      port_handling_usd: parametersSnapshot.port_handling_usd,
-      brokerage_usd: null,
-      pallet_count: 1,
-      duty_gct_pct: parametersSnapshot.duty_gct_pct,
-    })
-    .select("id")
-    .single();
-  if (insertError || !inserted) {
+  const { data: inserted, error: insertError } = await supabase.rpc("quote_origins_insert", {
+    p_quote_id: quoteId,
+    p_labels: [label],
+    p_port_handling_usd: parametersSnapshot.port_handling_usd,
+    p_duty_gct_pct: parametersSnapshot.duty_gct_pct,
+  });
+  const insertedRow = ((inserted as Array<{ id: string; origin_label: string }> | null) ?? [])[0];
+  if (insertError || !insertedRow) {
     return { originId: null, error: insertError?.message ?? "Could not create a shipment origin." };
   }
-  return { originId: inserted.id as string, error: null };
+  return { originId: insertedRow.id, error: null };
 }
 
 /**
@@ -247,35 +245,30 @@ export async function regroupLineItemOrigins(
   const groups = buildOriginGroups(suppliers);
   const supplierToLabel = supplierOriginLabelMap(groups);
 
-  const { data: originRows, error: originsError } = await supabase
-    .from("quote_origins")
-    .select("id, origin_label")
-    .eq("quote_id", quoteId);
+  // Through the security-definer functions (§8) — quote_origins is
+  // founder-only at the DB, so the read/create/delete below all go through
+  // the bridge functions rather than the table directly.
+  const { data: originRows, error: originsError } = await supabase.rpc("quote_origins_for_quote", {
+    p_quote_id: quoteId,
+  });
   if (originsError) return { error: originsError.message };
-  const existingOrigins = (originRows as Array<{ id: string; origin_label: string }>) ?? [];
+  const existingOrigins = ((originRows as QuoteOriginRow[] | null) ?? []).map((o) => ({
+    id: o.id,
+    origin_label: o.origin_label,
+  }));
 
   const plan = planOriginRegroup(existingOrigins, groups);
   const labelToId = new Map(plan.existingIdByLabel);
 
   if (plan.labelsToCreate.length > 0) {
-    const { data: inserted, error: insertError } = await supabase
-      .from("quote_origins")
-      .insert(
-        plan.labelsToCreate.map((label) => ({
-          quote_id: quoteId,
-          origin_label: label,
-          freight_export_fees_usd: 0,
-          ocean_freight_usd: null,
-          marine_insurance_usd: null,
-          port_handling_usd: snapshot?.port_handling_usd ?? null,
-          brokerage_usd: null,
-          pallet_count: 1,
-          duty_gct_pct: snapshot?.duty_gct_pct ?? null,
-        })),
-      )
-      .select("id, origin_label");
+    const { data: inserted, error: insertError } = await supabase.rpc("quote_origins_insert", {
+      p_quote_id: quoteId,
+      p_labels: plan.labelsToCreate,
+      p_port_handling_usd: snapshot?.port_handling_usd ?? null,
+      p_duty_gct_pct: snapshot?.duty_gct_pct ?? null,
+    });
     if (insertError) return { error: insertError.message };
-    for (const o of (inserted as Array<{ id: string; origin_label: string }>) ?? []) {
+    for (const o of (inserted as Array<{ id: string; origin_label: string }> | null) ?? []) {
       labelToId.set(o.origin_label, o.id);
     }
   }
@@ -292,7 +285,9 @@ export async function regroupLineItemOrigins(
   }
 
   if (plan.originIdsToRemove.length > 0) {
-    const { error: deleteError } = await supabase.from("quote_origins").delete().in("id", plan.originIdsToRemove);
+    const { error: deleteError } = await supabase.rpc("quote_origins_delete", {
+      p_ids: plan.originIdsToRemove,
+    });
     if (deleteError) return { error: deleteError.message };
   }
 

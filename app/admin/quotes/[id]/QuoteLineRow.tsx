@@ -170,7 +170,9 @@ export function QuoteLineRow({
       <td className="px-4 py-2 text-veridan-ink">
         {label}
         {line.isAdHoc && <span className="ml-2 rounded-full bg-veridan-warm-gray-pale px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-veridan-warm-gray">ad-hoc</span>}
-        <p className="text-xs text-veridan-warm-gray">{line.supplierName ?? "Unknown supplier"}</p>
+        <p className="text-xs text-veridan-warm-gray">
+          {line.supplierName ?? (line.supplierVisible ? "No supplier" : "Supplier hidden (founder-only)")}
+        </p>
         {deleteError && (
           <p role="alert" className="mt-1 text-xs text-red-600">
             {deleteError}
