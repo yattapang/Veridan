@@ -11,6 +11,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { QuoteCalculationResult } from "@/lib/landed-cost/types";
 import { roundHalfUp } from "@/lib/landed-cost/engine";
+import { createAdminClient } from "@/lib/supabase/admin";
 import type {
   ContactRow,
   ParametersSnapshotStored,
@@ -48,13 +49,19 @@ export async function loadQuoteState(
   if (quoteError) return { state: null, error: quoteError.message };
   if (!quote) return { state: null, error: null };
 
-  // Through the security-definer function, never a direct read of the
-  // founder-only quote_origins table (20260807000004_user_roles.sql §8) — a
-  // staff session's direct SELECT would return zero rows with no error and
-  // every downstream engine computation would silently zero out shipment
-  // cost. See lib/quotes/persist.ts header note / migration §8.
+  // Through the security-definer function, on the ADMIN (service-role)
+  // client — never a direct read of the founder-only quote_origins table,
+  // and never via the request-bound `supabase` client either
+  // (20260807000004_user_roles.sql §8, second pass): the function is granted
+  // to service_role ONLY, so a staff session's own JWT cannot call it at
+  // all. The admin client bypasses RLS entirely, so `quoteId` here must
+  // always be one the CALLING session is already entitled to — true today
+  // because every quote is readable to every signed-in staff/founder session
+  // at the app layer, but this is exactly the kind of call that must never
+  // be handed an id the caller hasn't been authorized for.
+  const admin = createAdminClient();
   const [originsResult, linesResult] = await Promise.all([
-    supabase.rpc("quote_origins_for_quote", { p_quote_id: quoteId }),
+    admin.rpc("quote_origins_for_quote", { p_quote_id: quoteId }),
     supabase.from("quote_line_items").select("*").eq("quote_id", quoteId).order("sort_order"),
   ]);
 
@@ -126,11 +133,17 @@ export async function persistComputed(
       .eq("id", l.lineId),
   );
 
-  // Through the security-definer function (§8) — it writes exactly these
-  // three computed-cache columns and nothing else on the founder-only row.
+  // Through the security-definer function, on the ADMIN client — service_role
+  // only (§8, second pass), so the request-bound `supabase` client could not
+  // call this even if we tried. It writes exactly these three computed-cache
+  // columns, scoped to `quote.id` as well as the origin id, and nothing else
+  // on the founder-only row. Bypasses RLS: `quote.id` must be one the calling
+  // session is already entitled to (true for every quote today).
+  const admin = createAdminClient();
   const originUpdates = result.origins.map((o) =>
-    supabase.rpc("quote_origins_update_computed", {
+    admin.rpc("quote_origins_update_computed", {
       p_id: o.originId,
+      p_quote_id: quote.id,
       p_supplier_invoice_total: roundHalfUp(o.supplierInvoiceTotalUsd, 2),
       p_cif_basis_usd: roundHalfUp(o.cifBasisUsd, 2),
       p_total_shipment_cost_usd: roundHalfUp(o.totalShipmentCostUsd, 2),
@@ -175,27 +188,31 @@ export async function ensureOriginForSupplier(
 ): Promise<{ originId: string | null; error: string | null }> {
   const label = supplierOriginKey(supplier);
 
-  // Through the security-definer functions (§8) — quote_origins is
-  // founder-only at the DB, so both the lookup and the create below go
-  // through the bridge functions rather than the table directly.
-  const { data: existingRows, error: findError } = await supabase.rpc("quote_origins_for_quote", {
+  // Through the security-definer functions, on the ADMIN client — quote_origins
+  // is founder-only at the DB and its bridge functions are service_role only
+  // (§8, second pass), so both the lookup and the create below go through the
+  // admin client rather than the request-bound `supabase` client, which could
+  // no longer call these RPCs at all. Bypasses RLS: `quoteId` must be one the
+  // calling session is already entitled to (true for every quote today).
+  const admin = createAdminClient();
+  const { data: existingRows, error: findError } = await admin.rpc("quote_origins_for_quote", {
     p_quote_id: quoteId,
   });
   if (findError) return { originId: null, error: findError.message };
   const existing = ((existingRows as QuoteOriginRow[] | null) ?? []).find((o) => o.origin_label === label);
   if (existing) return { originId: existing.id, error: null };
 
-  const { data: inserted, error: insertError } = await supabase.rpc("quote_origins_insert", {
+  const { data: inserted, error: insertError } = await admin.rpc("quote_origins_insert", {
     p_quote_id: quoteId,
     p_labels: [label],
     p_port_handling_usd: parametersSnapshot.port_handling_usd,
     p_duty_gct_pct: parametersSnapshot.duty_gct_pct,
   });
-  const insertedRow = ((inserted as Array<{ id: string; origin_label: string }> | null) ?? [])[0];
+  const insertedRow = ((inserted as Array<{ new_origin_id: string; new_origin_label: string }> | null) ?? [])[0];
   if (insertError || !insertedRow) {
     return { originId: null, error: insertError?.message ?? "Could not create a shipment origin." };
   }
-  return { originId: insertedRow.id, error: null };
+  return { originId: insertedRow.new_origin_id, error: null };
 }
 
 /**
@@ -245,10 +262,14 @@ export async function regroupLineItemOrigins(
   const groups = buildOriginGroups(suppliers);
   const supplierToLabel = supplierOriginLabelMap(groups);
 
-  // Through the security-definer functions (§8) — quote_origins is
-  // founder-only at the DB, so the read/create/delete below all go through
-  // the bridge functions rather than the table directly.
-  const { data: originRows, error: originsError } = await supabase.rpc("quote_origins_for_quote", {
+  // Through the security-definer functions, on the ADMIN client — quote_origins
+  // is founder-only at the DB and its bridge functions are service_role only
+  // (§8, second pass), so the read/create/delete below all go through the
+  // admin client rather than the request-bound `supabase` client, which could
+  // no longer call these RPCs at all. Bypasses RLS: `quoteId` must be one the
+  // calling session is already entitled to (true for every quote today).
+  const admin = createAdminClient();
+  const { data: originRows, error: originsError } = await admin.rpc("quote_origins_for_quote", {
     p_quote_id: quoteId,
   });
   if (originsError) return { error: originsError.message };
@@ -261,15 +282,15 @@ export async function regroupLineItemOrigins(
   const labelToId = new Map(plan.existingIdByLabel);
 
   if (plan.labelsToCreate.length > 0) {
-    const { data: inserted, error: insertError } = await supabase.rpc("quote_origins_insert", {
+    const { data: inserted, error: insertError } = await admin.rpc("quote_origins_insert", {
       p_quote_id: quoteId,
       p_labels: plan.labelsToCreate,
       p_port_handling_usd: snapshot?.port_handling_usd ?? null,
       p_duty_gct_pct: snapshot?.duty_gct_pct ?? null,
     });
     if (insertError) return { error: insertError.message };
-    for (const o of (inserted as Array<{ id: string; origin_label: string }> | null) ?? []) {
-      labelToId.set(o.origin_label, o.id);
+    for (const o of (inserted as Array<{ new_origin_id: string; new_origin_label: string }> | null) ?? []) {
+      labelToId.set(o.new_origin_label, o.new_origin_id);
     }
   }
 
@@ -285,8 +306,9 @@ export async function regroupLineItemOrigins(
   }
 
   if (plan.originIdsToRemove.length > 0) {
-    const { error: deleteError } = await supabase.rpc("quote_origins_delete", {
+    const { error: deleteError } = await admin.rpc("quote_origins_delete", {
       p_ids: plan.originIdsToRemove,
+      p_quote_id: quoteId,
     });
     if (deleteError) return { error: deleteError.message };
   }

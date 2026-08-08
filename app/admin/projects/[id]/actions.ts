@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import {
   PROJECT_STATUSES,
   PROJECT_TYPES,
@@ -405,13 +406,21 @@ export async function createDoorRegisterQuote(
   // 6. Insert the origin pools and map label → id.
   const originIdByLabel = new Map<string, string>();
   if (originGroups.length > 0) {
-    // Through the security-definer function, never a direct write to the
-    // now founder-only quote_origins table (20260807000004_user_roles.sql
-    // §8) — this action is staff-usable (no founder gate), and the function
-    // applies the same defaults this INSERT used to write directly:
-    // freight 0, ocean/marine/brokerage null → engine fallback formulas
-    // (§7.1 items 2–3), pallet_count 1.
-    const { data: insertedOrigins, error: originInsertError } = await supabase.rpc("quote_origins_insert", {
+    // Through the security-definer function, on the ADMIN (service-role)
+    // client — never a direct write to the now founder-only quote_origins
+    // table, and never via the request-bound `supabase` client either
+    // (20260807000004_user_roles.sql §8, second pass): the function is
+    // granted to service_role ONLY, so this action's own staff/founder JWT
+    // could not call it directly. This action is staff-usable (no founder
+    // gate), and the function applies the same defaults this INSERT used to
+    // write directly: freight 0, ocean/marine/brokerage null → engine
+    // fallback formulas (§7.1 items 2–3), pallet_count 1. The admin client
+    // bypasses RLS entirely, so `quoteId` here must always be one the
+    // CALLING session is already entitled to — it is: `quoteId` is the id
+    // this same action just inserted two steps above, not a caller-supplied
+    // value.
+    const originAdmin = createAdminClient();
+    const { data: insertedOrigins, error: originInsertError } = await originAdmin.rpc("quote_origins_insert", {
       p_quote_id: quoteId,
       p_labels: originGroups.map((g) => g.label),
       p_port_handling_usd: parametersSnapshot.port_handling_usd,
@@ -420,8 +429,8 @@ export async function createDoorRegisterQuote(
     if (originInsertError || !insertedOrigins) {
       return { ok: false, error: `Quote ${quoteRef} was created but its origin pools failed: ${originInsertError?.message ?? "unknown error"}.` };
     }
-    for (const o of insertedOrigins as Array<{ id: string; origin_label: string }>) {
-      originIdByLabel.set(o.origin_label, o.id);
+    for (const o of insertedOrigins as Array<{ new_origin_id: string; new_origin_label: string }>) {
+      originIdByLabel.set(o.new_origin_label, o.new_origin_id);
     }
   }
 

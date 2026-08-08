@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import type {
   ItemGroupRow,
   OverrideLogWithUser,
@@ -144,13 +145,17 @@ export default async function QuoteBuilderPage({
     productsQuery = productsQuery.in("item_group_id", gradeGroupIds);
   }
 
+  // Through the security-definer function, on the ADMIN (service-role)
+  // client (20260807000004_user_roles.sql §8, second pass) — the function is
+  // granted to service_role ONLY, so the request-bound `supabase` client
+  // could not call it at all, staff or founder. Fetched for EVERY viewer
+  // (staff included) because the engine needs it to compute the client-price
+  // totals staff do see. The admin client bypasses RLS entirely, so `id`
+  // here must always be one the CALLING session is already entitled to
+  // (true for every quote today).
+  const originsAdmin = createAdminClient();
   const [originsResult, linesResult, overridesResult, suppliersResult, productsResult, itemGroupsResult] = await Promise.all([
-    // Through the security-definer function, never a direct read of the
-    // founder-only quote_origins table (20260807000004_user_roles.sql §8) —
-    // fetched for EVERY viewer (staff included) because the engine needs it
-    // to compute the client-price totals staff do see; a denied direct read
-    // would return zero rows with no error and silently zero those totals.
-    supabase.rpc("quote_origins_for_quote", { p_quote_id: id }),
+    originsAdmin.rpc("quote_origins_for_quote", { p_quote_id: id }),
     supabase
       .from("quote_line_items")
       .select(

@@ -11,6 +11,7 @@
 import "server-only";
 import { renderToBuffer } from "@react-pdf/renderer";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { computeQuoteResult } from "@/lib/quotes/mapping";
 import { matchLeadTime } from "@/lib/quote-pdf/format";
 import { buildQuoteItemization } from "@/lib/quote-pdf/itemization";
@@ -55,12 +56,16 @@ export async function renderQuotePdf(supabase: Client, quoteId: string): Promise
 
   const architectCompanyId = quote.architect_company_id ?? quote.projects?.architect_company_id ?? null;
 
+  // Through the security-definer function, on the ADMIN (service-role)
+  // client (20260807000004_user_roles.sql §8, second pass) — the function is
+  // granted to service_role ONLY, so the request-bound `supabase` client
+  // (staff included: the "Download PDF" link only checks getCurrentUser(),
+  // not founder) could not call it at all. The admin client bypasses RLS
+  // entirely, so `quoteId` here must always be one the CALLING session is
+  // already entitled to (true for every quote today).
+  const admin = createAdminClient();
   const [originsResult, linesResult, architectResult] = await Promise.all([
-    // Through the security-definer function (20260807000004_user_roles.sql
-    // §8) — the "Download PDF" link is reachable by staff too (the route
-    // only checks getCurrentUser(), not founder), and a direct read of the
-    // now founder-only quote_origins table would silently return zero rows.
-    supabase.rpc("quote_origins_for_quote", { p_quote_id: quoteId }),
+    admin.rpc("quote_origins_for_quote", { p_quote_id: quoteId }),
     supabase
       .from("quote_line_items")
       .select(

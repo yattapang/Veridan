@@ -242,6 +242,13 @@ begin
 end;
 $$;
 
+-- Not directly callable regardless (its return type is `trigger`, and
+-- Postgres refuses to invoke a trigger function outside trigger context), but
+-- every other SECURITY DEFINER function in this migration revokes from
+-- `public` explicitly — this one was the only exception, and leaving it
+-- implicit is the kind of gap that gets copy-pasted forward.
+revoke all on function public.assert_active_founder_remains() from public;
+
 drop trigger if exists users_keep_one_active_founder on public.users;
 create trigger users_keep_one_active_founder
   after update or delete on public.users
@@ -323,7 +330,8 @@ grant select, insert on public.user_admin_audit_log to authenticated;
 -- headline example; silence is not acceptable here): RLS is row-level, not
 -- column-level. Cost COLUMNS on tables a staff member legitimately needs stay
 -- readable to any authenticated session that queries PostgREST directly, in
--- full:
+-- full, and two of the SECURITY DEFINER bridges below have the exact same
+-- shape of exposure by design:
 --   * products.unit_cost / cost_currency
 --   * quote_line_items.unit_cost / unit_cost_usd / landed_cost_usd /
 --     allocated_shipment_cost_usd / line_value_usd / margin_pct_override
@@ -331,12 +339,30 @@ grant select, insert on public.user_admin_audit_log to authenticated;
 --   * quotes.parameters_snapshot — the ENTIRE frozen pricing model for that
 --     quote: margin_tiers, margin_floor_pct, contingency_pct, duty_gct_pct,
 --     procurement_handling_fee_usd, and every other key
---     SNAPSHOT_PARAMETER_KEYS freezes (§7 above). A staff member who reads
+--     SNAPSHOT_PARAMETER_KEYS freezes (§7 below). A staff member who reads
 --     this column directly via PostgREST sees the founder's margin floor and
 --     margin tiers plainly, in JSON, on every quote row — this is NOT
 --     narrower than reading business_parameters itself, it is the same
 --     numbers copied onto a table staff already have row access to.
 --   * hardware_set_line_items.unit_cost_override / cost_currency_override
+--   * public.snapshot_business_parameters() (§7 below) — this bridge is
+--     DELIBERATELY grantable to `authenticated`, not just to a staff session
+--     mid quote-creation: any authenticated caller can `POST
+--     /rest/v1/rpc/snapshot_business_parameters` directly and get
+--     margin_floor_pct and margin_tiers back, at any time, not only while
+--     creating a quote. Same numbers as business_parameters itself, reached
+--     through a door left open on purpose rather than a leak in one meant to
+--     be shut — unlike quote_origins' bridge functions (§8 below), which are
+--     NOT part of this list because they are service_role only.
+--   * public.pipeline_view.total_landed_usd — the view is granted to
+--     `authenticated` (only `anon` was revoked, 20260717000001:70). §9 below
+--     adds `security_invoker`, which makes the view finally evaluate RLS as
+--     the querying session rather than the view owner, but that does not
+--     touch the grant. Because enquiries/projects/quotes all stay
+--     `using (true)` for `authenticated` today, an invoker-rights read still
+--     returns every row's total_landed_usd to every authenticated session —
+--     §9 closes a latent bypass, it does not itself restrict who sees this
+--     column.
 -- Hiding those would need per-column grants (which cannot distinguish founder
 -- from staff — both are the `authenticated` DB role) or a parallel set of
 -- cost-free views wired through every founder page. They are hidden at the
@@ -346,14 +372,17 @@ grant select, insert on public.user_admin_audit_log to authenticated;
 -- threat: a staff member using the admin UI or reading view-source. Closing
 -- it at the DB needs a views refactor — out of scope here.
 --
--- WHAT IS *NOT* A LIMITATION, and is closed below: every table and bucket whose
--- WHOLE PURPOSE is cost, price history, invoicing, expenses or supplier data —
--- including public.quote_origins (§8 below), which very much belongs in this
--- category (every non-key column is a shipment-cost figure) but needed a
--- definer-function bridge rather than a straight table close, because staff
--- quote creation/editing both reads and writes it directly as the landed-cost
--- engine's working storage. See §8 for the full reasoning and the exact call
--- sites rewired onto the bridge functions.
+-- WHAT IS *NOT* A LIMITATION, and is closed below: every table and bucket
+-- whose WHOLE PURPOSE is cost, price history, invoicing, expenses or supplier
+-- data, WITH THE TWO NAMED EXCEPTIONS ABOVE (snapshot_business_parameters(),
+-- pipeline_view.total_landed_usd) — those two are the only doors left open on
+-- purpose, and both are named above rather than left implicit.
+-- public.quote_origins (§8 below) is NOT a third exception: every non-key
+-- column there is a shipment-cost figure, and both the table and the four
+-- functions that bridge it are closed to anything other than service_role —
+-- a staff or founder JWT plus the anon key cannot reach it by any route,
+-- direct table access or RPC. See §8 for the full reasoning, including the
+-- first attempt at this that did not fully close it.
 -- ----------------------------------------------------------------------------
 drop policy if exists business_parameters_founder_all on public.business_parameters;
 create policy business_parameters_founder_all on public.business_parameters
@@ -580,10 +609,11 @@ comment on function public.quote_origin_suppliers(uuid[]) is
   'Origin-grouping fields (region/country) for the given suppliers — the minimum a staff-created quote needs to build its shipment-origin cost pools. Deliberately excludes name, notes, default_currency, lead times and every other column of the founder-only supplier ledger.';
 
 -- ----------------------------------------------------------------------------
--- 8. public.quote_origins — closed to founder-only, with definer functions
---    bridging exactly the reads/writes the quote engine needs (re-review
---    finding, 2026-08-08). Still `for all to authenticated using (true)` from
---    20260713000002_rls.sql:86.
+-- 8. public.quote_origins — closed outright, including its own bridge
+--    functions (re-review finding, 2026-08-08; the first pass at this closed
+--    the table but not the actual hole — see below). Still
+--    `for all to authenticated using (true)` from 20260713000002_rls.sql:86
+--    before this section runs.
 --
 -- Every non-key column here is a supplier-cost or shipment-cost figure —
 -- freight_export_fees_usd, ocean_freight_usd, marine_insurance_usd,
@@ -592,40 +622,70 @@ comment on function public.quote_origin_suppliers(uuid[]) is
 -- lib/roles/costFree.ts's COST_FIELD_NAMES list). A staff JWT plus the public
 -- anon key reads the complete shipment cost build-up of every quote straight
 -- off PostgREST — `GET /rest/v1/quote_origins?select=*` — with no app code
--- involved. By §6b's own rule ("every table whose WHOLE PURPOSE is cost is
--- closed outright") this table qualifies exactly like extracted_prices and
--- product_price_history above.
+-- involved. This table belongs in the same category as extracted_prices and
+-- product_price_history above: its whole purpose is cost.
 --
--- Unlike those two, it cannot simply be closed: staff legitimately create and
--- edit quotes (§7 above), and quote creation/editing both reads AND WRITES
--- this table as the landed-cost engine's working storage —
--- lib/quotes/persist.ts (loadQuoteState, persistComputed,
--- ensureOriginForSupplier, regroupLineItemOrigins), the door-register
--- materialization in app/admin/projects/[id]/actions.ts
+-- Unlike those two, it cannot simply be closed at the table and left there:
+-- staff legitimately create and edit quotes (§7 above), and quote
+-- creation/editing both reads AND WRITES this table as the landed-cost
+-- engine's working storage — lib/quotes/persist.ts (loadQuoteState,
+-- persistComputed, ensureOriginForSupplier, regroupLineItemOrigins), the
+-- door-register materialization in app/admin/projects/[id]/actions.ts
 -- (createDoorRegisterQuote — staff-usable, no founder gate), the quote
 -- builder page render (app/admin/quotes/[id]/page.tsx — fetches origins for
 -- EVERY viewer, staff included, to run the engine for the client-price
 -- totals staff do see), and the quote PDF (lib/quotes/pdf.ts, reachable by
 -- staff via the unconditional "Download PDF" link — its route only checks
 -- getCurrentUser(), not founder). Under RLS a denied SELECT returns ZERO ROWS
--- with error = null, not an error (§7's own rationale) — so tightening this
--- table without a bridge would not fail loudly, it would silently zero out
--- every shipment cost in a staff-created or staff-viewed quote's totals.
+-- with error = null, not an error (§7's own rationale) — so cutting off this
+-- table's read path without a replacement would not fail loudly, it would
+-- silently zero out every shipment cost in a staff-created or staff-viewed
+-- quote's totals.
 --
--- Closed the same way as business_parameters/suppliers in §7: the TABLE goes
--- founder-only, and a narrow set of SECURITY DEFINER functions gives staff
--- exactly the read/insert/update/delete shapes the app's own quote-engine
--- code already performs — nothing else. Every OTHER call site that touches
--- this table (app/admin/quotes/[id]/actions.ts editOrigin,
+-- FIRST PASS (superseded below): the table was made founder-only and four
+-- SECURITY DEFINER functions were added, granted to `authenticated,
+-- service_role`, so staff could reach the exact read/insert/update/delete
+-- shapes the app's own quote-engine code performs. That closed the TABLE but
+-- not the real hole: the functions were still callable by any `authenticated`
+-- session, `quote_origins_for_quote` accepted a caller-supplied p_quote_id
+-- with no entitlement check and returned the full row, and quote ids are
+-- freely enumerable (`GET /rest/v1/quotes?select=id`, quotes itself stays
+-- `using (true)`) — so a staff JWT plus the anon key could still loop the RPC
+-- over every quote id and read the complete shipment-cost build-up of the
+-- entire business, one HTTP call away instead of zero. The three write
+-- functions were equally unscoped by caller identity: any authenticated
+-- caller could insert origin rows into ANY quote including approved/sent
+-- ones, or update/delete any row by raw id.
+--
+-- SECOND PASS (what actually ships): the four functions below are granted to
+-- `service_role` ONLY — no `authenticated` grant at all. Direct RPC access
+-- from a staff or founder JWT plus the anon key is refused outright, closing
+-- both the table and the bridge. The app-layer call sites that need these
+-- shapes — the same four files named above (lib/quotes/persist.ts,
+-- lib/quotes/pdf.ts, app/admin/quotes/[id]/page.tsx,
+-- app/admin/projects/[id]/actions.ts) — are rewired in this same commit onto
+-- `createAdminClient()` (lib/supabase/admin.ts), the existing service-role
+-- client already used elsewhere for privileged server-side work. Each
+-- rewired call site carries a comment that the admin client bypasses RLS
+-- entirely, so it must never be handed a quote id the calling session isn't
+-- entitled to — a non-issue today (every staff and founder session is
+-- entitled to every quote) but load-bearing if that ever changes.
+-- `quote_origins_update_computed` and `quote_origins_delete` now also take a
+-- `p_quote_id` and scope their WHERE clause to it, so even a future re-grant
+-- back to `authenticated` could not by itself turn either into an
+-- unscoped-by-id mass-DML primitive again.
+--
+-- Every OTHER call site that touches this table directly
+-- (app/admin/quotes/[id]/actions.ts editOrigin,
 -- app/admin/quotes/[id]/workflowActions.ts createRevision,
 -- app/admin/quotes/[id]/lineItemActions.ts,
 -- app/admin/price-files/[id]/review/actions.ts) is already founder-gated with
--- requireFounderAction at the app layer, so is_founder() passes for them
--- unchanged and they need no code change; the four files above are the ones
--- this migration's matching code change (same commit) rewires onto the
--- functions below. lib/invoices/itemization.ts and lib/reports/load.ts also
--- read this table, but /admin/invoices and /admin/reports are founder-gated
--- whole at the layout level (requireFounderPage), so they are unaffected too.
+-- requireFounderAction at the app layer and reads/writes the table directly
+-- (not via these functions) using the request-bound client, so is_founder()
+-- on the table's own RLS policy passes for them unchanged and they need no
+-- code change. lib/invoices/itemization.ts and lib/reports/load.ts also read
+-- this table, but /admin/invoices and /admin/reports are founder-gated whole
+-- at the layout level (requireFounderPage), so they are unaffected too.
 -- ----------------------------------------------------------------------------
 drop policy if exists quote_origins_founder_all on public.quote_origins;
 create policy quote_origins_founder_all on public.quote_origins
@@ -652,10 +712,10 @@ as $$
 $$;
 
 revoke all on function public.quote_origins_for_quote(uuid) from public;
-grant execute on function public.quote_origins_for_quote(uuid) to authenticated, service_role;
+grant execute on function public.quote_origins_for_quote(uuid) to service_role;
 
 comment on function public.quote_origins_for_quote(uuid) is
-  'Full-row read of a quote''s shipment-origin cost pools, for the landed-cost engine (staff and founder alike — quote_origins itself stays founder-only). This is the only other door onto the table.';
+  'Full-row read of a quote''s shipment-origin cost pools, for the landed-cost engine (staff and founder alike — quote_origins itself stays founder-only). service_role only: called from the server via lib/supabase/admin.ts createAdminClient(), never directly by an authenticated session. The caller is responsible for only ever passing a quote id the requesting session is entitled to.';
 
 -- Creates one origin row per label with the same seed defaults every existing
 -- INSERT call site already used (freight 0; ocean/marine/brokerage null so
@@ -667,13 +727,24 @@ comment on function public.quote_origins_for_quote(uuid) is
 -- writer this closes. The column set is fixed by the function body, not
 -- caller-supplied, so this cannot be used to write any column other than the
 -- seven every existing INSERT already wrote.
+--
+-- Output columns are deliberately prefixed (new_origin_id / new_origin_label,
+-- not id / origin_label) so they cannot collide with the actual quote_origins
+-- columns named in the RETURNING clause below — a RETURNS TABLE output name
+-- and a same-named column are ambiguous in a LANGUAGE sql body. Postgres
+-- resolves the unqualified `returning id, origin_label` below to the table's
+-- own columns (column-over-parameter), so the unprefixed names were correct
+-- either way, but that relied on the resolution rule rather than ruling the
+-- ambiguity out — matching the defensive prefixing quote_origin_suppliers()
+-- already uses above, and removing one more way `check_function_bodies`
+-- could abort this whole migration.
 create or replace function public.quote_origins_insert(
   p_quote_id uuid,
   p_labels text[],
   p_port_handling_usd numeric,
   p_duty_gct_pct numeric
 )
-returns table (id uuid, origin_label text)
+returns table (new_origin_id uuid, new_origin_label text)
 language sql
 security definer
 set search_path = public
@@ -688,19 +759,22 @@ as $$
 $$;
 
 revoke all on function public.quote_origins_insert(uuid, text[], numeric, numeric) from public;
-grant execute on function public.quote_origins_insert(uuid, text[], numeric, numeric) to authenticated, service_role;
+grant execute on function public.quote_origins_insert(uuid, text[], numeric, numeric) to service_role;
 
 comment on function public.quote_origins_insert(uuid, text[], numeric, numeric) is
-  'Creates new shipment-origin pools with the standard engine-fallback defaults (persist.ts ensureOriginForSupplier / regroupLineItemOrigins, and createDoorRegisterQuote). Cannot write any column beyond the seven the function body fixes.';
+  'Creates new shipment-origin pools with the standard engine-fallback defaults (persist.ts ensureOriginForSupplier / regroupLineItemOrigins, and createDoorRegisterQuote). Cannot write any column beyond the seven the function body fixes. service_role only: called via lib/supabase/admin.ts createAdminClient().';
 
 -- Writes back exactly the three computed caches persistComputed produces —
 -- nothing else on the row is reachable through this function. The editable
 -- freight/insurance/brokerage INPUTS stay founder-only via direct table
 -- access (app/admin/quotes/[id]/actions.ts editOrigin is already
 -- requireFounderAction-gated), matching the app-layer rule that only a
--- founder edits those.
+-- founder edits those. Scoped to p_quote_id as well as p_id so that even if
+-- this function's grant were ever loosened again, it could not become an
+-- unscoped-by-id UPDATE primitive on its own.
 create or replace function public.quote_origins_update_computed(
   p_id uuid,
+  p_quote_id uuid,
   p_supplier_invoice_total numeric,
   p_cif_basis_usd numeric,
   p_total_shipment_cost_usd numeric
@@ -714,31 +788,36 @@ as $$
      set supplier_invoice_total = p_supplier_invoice_total,
          cif_basis_usd = p_cif_basis_usd,
          total_shipment_cost_usd = p_total_shipment_cost_usd
-   where id = p_id;
+   where id = p_id
+     and quote_id = p_quote_id;
 $$;
 
-revoke all on function public.quote_origins_update_computed(uuid, numeric, numeric, numeric) from public;
-grant execute on function public.quote_origins_update_computed(uuid, numeric, numeric, numeric) to authenticated, service_role;
+revoke all on function public.quote_origins_update_computed(uuid, uuid, numeric, numeric, numeric) from public;
+grant execute on function public.quote_origins_update_computed(uuid, uuid, numeric, numeric, numeric) to service_role;
 
-comment on function public.quote_origins_update_computed(uuid, numeric, numeric, numeric) is
-  'Persists the landed-cost engine''s per-origin computed caches (lib/quotes/persist.ts persistComputed). Cannot touch any other column on the row.';
+comment on function public.quote_origins_update_computed(uuid, uuid, numeric, numeric, numeric) is
+  'Persists the landed-cost engine''s per-origin computed caches (lib/quotes/persist.ts persistComputed). Scoped to p_quote_id as well as p_id; cannot touch any other column on the row. service_role only: called via lib/supabase/admin.ts createAdminClient().';
 
 -- Deletes origin rows regroupLineItemOrigins has already re-pointed every
 -- line away from (its own doc comment, step 4) — never a row still in use.
-create or replace function public.quote_origins_delete(p_ids uuid[])
+-- Scoped to p_quote_id so this cannot become an unscoped-by-id mass-DML
+-- primitive if the grant is ever loosened again.
+create or replace function public.quote_origins_delete(p_ids uuid[], p_quote_id uuid)
 returns void
 language sql
 security definer
 set search_path = public
 as $$
-  delete from public.quote_origins where id = any (coalesce(p_ids, array[]::uuid[]));
+  delete from public.quote_origins
+   where id = any (coalesce(p_ids, array[]::uuid[]))
+     and quote_id = p_quote_id;
 $$;
 
-revoke all on function public.quote_origins_delete(uuid[]) from public;
-grant execute on function public.quote_origins_delete(uuid[]) to authenticated, service_role;
+revoke all on function public.quote_origins_delete(uuid[], uuid) from public;
+grant execute on function public.quote_origins_delete(uuid[], uuid) to service_role;
 
-comment on function public.quote_origins_delete(uuid[]) is
-  'Deletes shipment-origin pools by id, for lib/quotes/persist.ts regroupLineItemOrigins reconciling a line_item quote''s pools after an edit.';
+comment on function public.quote_origins_delete(uuid[], uuid) is
+  'Deletes shipment-origin pools by id, scoped to p_quote_id — for lib/quotes/persist.ts regroupLineItemOrigins reconciling a line_item quote''s pools after an edit. service_role only: called via lib/supabase/admin.ts createAdminClient().';
 
 -- ----------------------------------------------------------------------------
 -- 9. public.pipeline_view — close the RLS-bypass latent in every plain view
