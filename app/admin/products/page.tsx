@@ -12,7 +12,13 @@ import { collectDistinctFinishValues } from "@/lib/products/finishes";
 import { InstructiveMessage } from "@/components/admin/InstructiveMessage";
 import { signPriceFileUrl, fileNameFromPath } from "@/lib/storage";
 import { ProductForm } from "./ProductForm";
-import { ProductListItem, type ProductPriceProvenance } from "./ProductListItem";
+import { ProductListItem } from "./ProductListItem";
+import {
+  STAFF_PRODUCT_COLUMNS,
+  toProductListItemView,
+  type ProductListSourceRow,
+  type ProductPriceProvenance,
+} from "./productView";
 import { requireAdminArea } from "@/lib/roles/guards";
 
 export const metadata = {
@@ -54,14 +60,21 @@ export default async function ProductsPage({
     );
   }
 
+  // `public.suppliers` is founder-only at the database (20260807000004 §6b) and
+  // the supplier list is only ever needed by the founder-only add/edit form and
+  // the supplier filter that goes with it. A staff session does not query it at
+  // all: not to "hide" it, but so there is no supplier data on this server render
+  // that could be forwarded into a client component's props by a later edit.
   let suppliers: SupplierRow[] = [];
   let suppliersError: string | null = null;
-  try {
-    const { data, error } = await supabase.from("suppliers").select("*").order("name");
-    if (error) suppliersError = error.message;
-    else suppliers = (data as SupplierRow[]) ?? [];
-  } catch (err) {
-    suppliersError = err instanceof Error ? err.message : "Unknown error reaching Supabase.";
+  if (showCosts) {
+    try {
+      const { data, error } = await supabase.from("suppliers").select("*").order("name");
+      if (error) suppliersError = error.message;
+      else suppliers = (data as SupplierRow[]) ?? [];
+    } catch (err) {
+      suppliersError = err instanceof Error ? err.message : "Unknown error reaching Supabase.";
+    }
   }
 
   let itemGroups: ItemGroupRow[] = [];
@@ -81,17 +94,21 @@ export default async function ProductsPage({
   // query over the whole table (not RESULT_LIMIT/search-scoped) so the
   // type-ahead always reflects every finish value ever entered, not just
   // what's currently on screen — see lib/products/finishes.ts.
+  // Only the founder-only ProductForm consumes this, so a staff session skips
+  // the round-trip entirely.
   let distinctFinishes = collectDistinctFinishValues([]);
-  try {
-    const { data } = await supabase
-      .from("products")
-      .select("specified_finish, supplied_finish, finish_code");
-    distinctFinishes = collectDistinctFinishValues(
-      (data as { specified_finish: string | null; supplied_finish: string | null; finish_code: string | null }[] | null) ?? []
-    );
-  } catch {
-    // Best-effort — an empty type-ahead is a reasonable fallback if this
-    // query fails while the main product list load below succeeds.
+  if (showCosts) {
+    try {
+      const { data } = await supabase
+        .from("products")
+        .select("specified_finish, supplied_finish, finish_code");
+      distinctFinishes = collectDistinctFinishValues(
+        (data as { specified_finish: string | null; supplied_finish: string | null; finish_code: string | null }[] | null) ?? []
+      );
+    } catch {
+      // Best-effort — an empty type-ahead is a reasonable fallback if this
+      // query fails while the main product list load below succeeds.
+    }
   }
 
   // Grade lives on item_groups, not products, so filtering by grade means
@@ -104,9 +121,17 @@ export default async function ProductsPage({
     gradeGroupIds = (data ?? []).map((r) => r.id as string);
   }
 
+  // Two column lists, chosen by role. A staff session never SELECTs unit_cost /
+  // cost_currency and never embeds the founder-only suppliers table, so the cost
+  // columns are absent from this request's result set entirely — there is no
+  // server-side copy of them on this page to leak into an RSC payload.
   let query = supabase
     .from("products")
-    .select("*, suppliers(id, name), item_groups(id, family_name, grade)")
+    .select(
+      showCosts
+        ? "*, suppliers(id, name), item_groups(id, family_name, grade)"
+        : STAFF_PRODUCT_COLUMNS
+    )
     .order("description")
     .limit(RESULT_LIMIT);
 
@@ -132,13 +157,16 @@ export default async function ProductsPage({
     query = query.in("item_group_id", gradeGroupIds);
   }
 
-  let data: ProductWithSupplier[] | null = null;
+  // Typed as the NARROW shape for everyone: the founder query is a superset, so
+  // this is sound, and it means the list-rendering code below cannot reach for a
+  // cost column even when one happens to have been fetched.
+  let data: ProductListSourceRow[] | null = null;
   let loadError: string | null = null;
 
   try {
     const { data: rows, error } = await query;
     if (error) loadError = error.message;
-    else data = rows as unknown as ProductWithSupplier[];
+    else data = rows as unknown as ProductListSourceRow[];
   } catch (err) {
     loadError = err instanceof Error ? err.message : "Unknown error reaching Supabase.";
   }
@@ -157,13 +185,27 @@ export default async function ProductsPage({
 
   const products = data ?? [];
 
+  // The full rows, kept SERVER-SIDE only and only for a founder — they are the
+  // inline edit form's input. `fullRowById` is empty for a staff session, so the
+  // `costs` prop below is null and nothing cost-shaped exists to serialise.
+  const fullRowById = new Map<string, ProductWithSupplier>(
+    showCosts
+      ? (products as unknown as ProductWithSupplier[]).map((p) => [p.id, p] as const)
+      : []
+  );
+
   // Task 40 provenance surfacing: "last updated <date> from <source file>"
   // for products whose current price came from a scanned upload. Most-recent
   // product_price_history row per product, with its source file's signed
   // download link (best-effort — history still shows without a link if
   // signing fails, e.g. Storage not configured).
+  //
+  // Founder-only: `product_price_history` is the historical supplier cost book
+  // and is founder-only at the database from 20260807000004 §6b, and the signed
+  // link points into the founder-only `price-files` bucket. Skipped outright for
+  // staff rather than fetched-then-not-rendered.
   const priceProvenanceById = new Map<string, ProductPriceProvenance>();
-  if (products.length > 0) {
+  if (showCosts && products.length > 0) {
     const { data: historyRows } = await supabase
       .from("product_price_history")
       .select("product_id, effective_date, price_file_uploads(original_filename, file_storage_path)")
@@ -290,19 +332,24 @@ export default async function ProductsPage({
               ))}
             </select>
           </div>
-          <div>
-            <label className="block text-xs font-medium uppercase tracking-wide text-veridan-warm-gray" htmlFor="supplier_id">
-              Supplier
-            </label>
-            <select id="supplier_id" name="supplier_id" defaultValue={supplierId} className={`${inputClass} mt-1`}>
-              <option value="">All suppliers</option>
-              {suppliers.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* Supplier is a founder-only dimension (the suppliers table is
+              founder-only at the DB), so staff get no supplier filter rather
+              than an empty dropdown that silently matches nothing. */}
+          {showCosts && (
+            <div>
+              <label className="block text-xs font-medium uppercase tracking-wide text-veridan-warm-gray" htmlFor="supplier_id">
+                Supplier
+              </label>
+              <select id="supplier_id" name="supplier_id" defaultValue={supplierId} className={`${inputClass} mt-1`}>
+                <option value="">All suppliers</option>
+                {suppliers.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <div>
             <label className="block text-xs font-medium uppercase tracking-wide text-veridan-warm-gray" htmlFor="manufacturer">
               Manufacturer
@@ -396,18 +443,29 @@ export default async function ProductsPage({
           />
         ) : (
           <ul className="rounded-md border border-veridan-warm-gray-light bg-white px-5">
-            {products.map((product) => (
-              <ProductListItem
-                key={product.id}
-                product={product}
-                suppliers={suppliers}
-                itemGroups={itemGroups}
-                productCategories={productCategories}
-                distinctFinishes={distinctFinishes}
-                priceProvenance={priceProvenanceById.get(product.id) ?? null}
-                showCosts={showCosts}
-              />
-            ))}
+            {products.map((product) => {
+              const fullRow = fullRowById.get(product.id);
+              return (
+                <ProductListItem
+                  key={product.id}
+                  product={toProductListItemView(product)}
+                  costs={
+                    fullRow
+                      ? {
+                          row: fullRow,
+                          unitCost: fullRow.unit_cost,
+                          costCurrency: fullRow.cost_currency,
+                          suppliers,
+                          itemGroups,
+                          productCategories,
+                          distinctFinishes,
+                          priceProvenance: priceProvenanceById.get(product.id) ?? null,
+                        }
+                      : null
+                  }
+                />
+              );
+            })}
           </ul>
         )}
       </section>

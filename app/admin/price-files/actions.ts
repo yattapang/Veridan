@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
+import { requireFounderAction } from "@/lib/roles/guards";
 import { uploadPriceFile } from "@/lib/storage";
 import { buildPriceFileStoragePath, validatePriceFile } from "@/lib/price-files";
 
@@ -31,6 +32,16 @@ export async function createPriceFileUpload(
 
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to upload a price file." };
+
+  // Founder-only (security review 2026-08-08). A supplier price file IS a list of
+  // supplier costs — it is the source every `extracted_prices` and
+  // `product_price_history` row is scanned out of — and the `price-files` bucket
+  // is founder-only in Storage from 20260807000004 §6c. Without this gate a staff
+  // upload would fail deep inside Storage with an opaque policy error instead of
+  // a sentence explaining why. Staff keep the uploads LIST (file name, status),
+  // which is the split lib/roles/matrix.ts already documents.
+  const founderGate = await requireFounderAction("upload a supplier price file");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
 
   const file = formData.get("file");
   if (!(file instanceof File)) {

@@ -19,9 +19,15 @@ import type { UserRow } from "@/lib/supabase/types";
  *   - existing row → UPDATE email, display_name. Role and active are untouched,
  *     so a user invited as 'staff' stays staff after their first login, and a
  *     deactivated user cannot resurrect themselves by signing in.
- *   - no row yet   → INSERT id/email/display_name only, letting role and active
- *     take their column DEFAULTS ('staff', true — see the 20260807000004
- *     migration). A self-created row is therefore least-privileged by default.
+ *   - no row yet   → REFUSED. This is invite-only software.
+ *
+ * That refusal is the other half of MAJOR-1 (security review 2026-08-08).
+ * Denying a row-less session in lib/roles/session.ts achieves nothing on its own
+ * if the very next thing that happens is this function CREATING the row: a
+ * self-registered account would be denied for exactly one request and admitted
+ * as staff on the second. So account creation now lives in exactly one place —
+ * a founder's invite in app/admin/team/actions.ts, which writes the row with the
+ * service-role client and an explicit role. There is no other path in.
  *
  * The database backs this up: `authenticated` has no UPDATE privilege on the
  * role/active columns at all (per-column grants in the same migration), so even
@@ -83,13 +89,15 @@ export async function syncUserRecord(): Promise<{
     return { error: error?.message ?? null };
   }
 
-  const { error } = await supabase.from("users").insert({
-    id: user.id,
-    email: user.email ?? "",
-    display_name: displayName,
-  });
-
-  return { error: error?.message ?? null };
+  // No row, and we do NOT make one. `deactivated: true` reuses the login form's
+  // existing "sign this session straight back out" path, which is exactly the
+  // right handling: the credentials were valid, the account is not.
+  return {
+    error:
+      "This Supabase account has no Veridan admin profile, so it cannot sign in. " +
+      "Access is by invitation only — ask a founder to invite you from the Team page.",
+    deactivated: true,
+  };
 }
 
 /**
@@ -104,10 +112,10 @@ export async function syncUserRecord(): Promise<{
  *     everywhere at once — the admin layout, every server action, every route
  *     handler — rather than depending on ~90 call sites each remembering to ask.
  *
- *  2. The no-row fallback is 'staff', not 'founder'. The row genuinely can be
- *     missing for a beat on a first login (the sync races this read), and the
- *     old fallback handed that request full founder access. Least privilege on
- *     an unknown row is the only safe default now that a second role exists.
+ *  2. A session with NO `public.users` row resolves to null as well. It briefly
+ *     resolved to a staff user instead, which — with Supabase's default of email
+ *     sign-ups enabled — meant self-registration into /admin. Rows are created
+ *     only by a founder's invite, so "no row" now means "not a Veridan user".
  */
 export async function getCurrentUser(): Promise<UserRow | null> {
   let supabase;

@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import type { PriceFileUploadWithDetails, SupplierRow } from "@/lib/supabase/types";
 import { InstructiveMessage } from "@/components/admin/InstructiveMessage";
+import { requireAdminArea } from "@/lib/roles/guards";
 import { UploadForm } from "./UploadForm";
 import { PriceFileListItem } from "./PriceFileListItem";
 
@@ -9,6 +10,14 @@ export const metadata = {
 };
 
 export default async function PriceFilesPage() {
+  // Staff may see the uploads LIST (file name, status, when) — that is the split
+  // lib/roles/matrix.ts documents — but uploading is founder work: a supplier
+  // price file is a list of supplier costs, and the `price-files` bucket is
+  // founder-only in Storage from 20260807000004 §6c. This guard was previously
+  // inherited from the admin layout only; it is stated here because this page
+  // now makes a role-dependent decision of its own.
+  const { showCosts } = await requireAdminArea("price-files");
+
   let supabase;
   try {
     supabase = await createClient();
@@ -54,12 +63,16 @@ export default async function PriceFilesPage() {
     );
   }
 
-  const { data: suppliersData } = await supabase
-    .from("suppliers")
-    .select("*")
-    .eq("active", true)
-    .order("name");
-  const suppliers = (suppliersData as SupplierRow[]) ?? [];
+  // Founder-only table, and only the founder-only upload form consumes it.
+  let suppliers: SupplierRow[] = [];
+  if (showCosts) {
+    const { data: suppliersData } = await supabase
+      .from("suppliers")
+      .select("*")
+      .eq("active", true)
+      .order("name");
+    suppliers = (suppliersData as SupplierRow[]) ?? [];
+  }
 
   const rows = uploads ?? [];
 
@@ -73,12 +86,14 @@ export default async function PriceFilesPage() {
         quote.
       </p>
 
+      {showCosts && (
       <section className="mt-8 rounded-md border border-veridan-warm-gray-light bg-white px-5 py-5">
         <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">
           Upload a price file
         </h2>
         <UploadForm suppliers={suppliers} />
       </section>
+      )}
 
       <section className="mt-10">
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">

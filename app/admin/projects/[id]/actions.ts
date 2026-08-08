@@ -6,7 +6,6 @@ import { createClient } from "@/lib/supabase/server";
 import {
   PROJECT_STATUSES,
   PROJECT_TYPES,
-  type BusinessParameterRow,
   type HardwareSetLineItemWithDetails,
   type ProjectStatus,
   type ProjectType,
@@ -14,11 +13,11 @@ import {
 import { nextSetCode, resolveLineCost, toUsdIndicative, type SupplierFxRates } from "@/lib/hardware-sets";
 import { getCurrentUser } from "@/lib/auth";
 import { buildFxSnapshot, buildParametersSnapshot } from "@/lib/quotes/snapshot";
+import { loadQuoteOriginSuppliers, loadSnapshotParameters } from "@/lib/quotes/snapshotSource";
 import {
   buildOriginGroups,
   nextQuoteRef,
   supplierOriginLabelMap,
-  type SupplierOriginFields,
 } from "@/lib/quotes/mapping";
 import { recomputeQuote } from "@/lib/quotes/persist";
 
@@ -34,7 +33,17 @@ function isProjectStatus(value: unknown): value is ProjectStatus {
   return typeof value === "string" && (PROJECT_STATUSES as string[]).includes(value);
 }
 
-/** Updates the project header fields (Task 14). */
+/**
+ * Updates the project header fields (Task 14).
+ *
+ * DELIBERATELY STAFF-USABLE (founder decision, security review 2026-08-08).
+ * The rule is "staff prepare the work, founders commit the client-facing and
+ * cost-bearing actions". Renaming a project, changing its type/status/site
+ * address or its architect is preparation: it touches no cost, sends nothing to
+ * a client, and is the day-to-day work staff were hired for. A signed-in check
+ * is the whole guard, and that is intended — do not add requireFounderAction
+ * here without a matching decision from the founder.
+ */
 export async function updateProject(
   projectId: string,
   _prevState: ProjectActionResult,
@@ -95,6 +104,13 @@ export async function updateProject(
  * via the `uq_hardware_sets_project_code` unique constraint — a race
  * between two tabs adding a set at once surfaces as a clear DB error
  * rather than silently colliding.
+ *
+ * DELIBERATELY STAFF-USABLE (founder decision, security review 2026-08-08).
+ * A hardware set is a named, empty container — a code and a label. It carries no
+ * cost of its own; the costs live on its LINE ITEMS, and both the line-item
+ * editor page (/admin/projects/:id/hardware-sets/:setId, a COST_DETAIL_ROUTE)
+ * and its actions are founder-only. Creating the container is exactly the
+ * "staff prepare the work" case.
  */
 export async function createHardwareSet(
   projectId: string,
@@ -144,6 +160,16 @@ export async function createHardwareSet(
  * sequentially (set insert, then line-item inserts); if the line-item copy
  * fails partway, the new (possibly-partial) set still exists — surfaced
  * clearly so staff can inspect/fix it rather than silently losing lines.
+ *
+ * DELIBERATELY STAFF-USABLE (founder decision, security review 2026-08-08),
+ * and this one was looked at closely because it DOES copy `unit_cost_override` /
+ * `cost_currency_override` between rows. It is allowed because copying a value
+ * from one row to another is not the same as disclosing it: the override columns
+ * are read and written entirely server-side here, never returned to the caller,
+ * and the only screen that would display them is founder-only. Reusing last
+ * project's ironmongery schedule is the single biggest time-saver staff have.
+ * If that reasoning ever stops holding — e.g. this action starts returning the
+ * copied lines — it becomes founder-only.
  */
 export async function cloneHardwareSet(
   projectId: string,
@@ -278,13 +304,24 @@ export async function createDoorRegisterQuote(
   if (projectError) return { ok: false, error: `Could not load the project: ${projectError.message}` };
   if (!project) return { ok: false, error: "Project not found." };
 
-  const { data: paramRows, error: paramError } = await supabase.from("business_parameters").select("*");
-  if (paramError) return { ok: false, error: `Could not load business parameters: ${paramError.message}` };
+  // Through the security-definer function, never the founder-only table
+  // directly — a staff session's direct SELECT would return zero rows with no
+  // error and this quote would be frozen at hard-coded defaults. See
+  // lib/quotes/snapshotSource.ts.
+  const { parameters, error: paramError } = await loadSnapshotParameters(supabase);
+  if (paramError) return { ok: false, error: paramError };
 
-  const parameters = (paramRows as BusinessParameterRow[]) ?? [];
   const quoteDate = new Date().toISOString().slice(0, 10);
-  const parametersSnapshot = buildParametersSnapshot(parameters);
-  const fxSnapshot = buildFxSnapshot(parameters, quoteDate);
+  let parametersSnapshot;
+  let fxSnapshot;
+  try {
+    parametersSnapshot = buildParametersSnapshot(parameters);
+    fxSnapshot = buildFxSnapshot(parameters, quoteDate);
+  } catch (err) {
+    // The builders refuse an incomplete parameter set outright (BLOCKER-3b).
+    // Surfaced as a normal action error rather than an unhandled digest.
+    return { ok: false, error: err instanceof Error ? err.message : "Could not snapshot the pricing parameters." };
+  }
   const fxRates = fxSnapshot.supplier_rates as SupplierFxRates;
 
   // 2. Doors with an assigned set, and the line items of the sets they use.
@@ -319,16 +356,15 @@ export async function createDoorRegisterQuote(
   }
 
   // 3. Distinct suppliers used → origin pools.
-  const supplierIds = [...new Set(setLines.map((l) => l.supplier_id))];
-  let suppliers: SupplierOriginFields[] = [];
-  if (supplierIds.length > 0) {
-    const { data: supplierRows, error: supplierError } = await supabase
-      .from("suppliers")
-      .select("id, origin_region, country")
-      .in("id", supplierIds);
-    if (supplierError) return { ok: false, error: `Could not load suppliers: ${supplierError.message}` };
-    suppliers = (supplierRows as SupplierOriginFields[]) ?? [];
-  }
+  // Same reasoning as the parameters read above: `suppliers` is founder-only, and
+  // a staff session reading it directly would get zero rows (no error), no origin
+  // pools, and therefore a quote with ZERO line items. The definer function
+  // returns only the two origin-grouping columns.
+  const supplierIds = [...new Set(setLines.map((l) => l.supplier_id))].filter(
+    (v): v is string => Boolean(v)
+  );
+  const { suppliers, error: supplierError } = await loadQuoteOriginSuppliers(supabase, supplierIds);
+  if (supplierError) return { ok: false, error: supplierError };
   const originGroups = buildOriginGroups(suppliers);
   const supplierToLabel = supplierOriginLabelMap(originGroups);
 
@@ -478,13 +514,20 @@ export async function createLineItemQuoteRecord(projectId: string): Promise<Crea
   if (projectError) return { ok: false, error: `Could not load the project: ${projectError.message}` };
   if (!project) return { ok: false, error: "Project not found." };
 
-  const { data: paramRows, error: paramError } = await supabase.from("business_parameters").select("*");
-  if (paramError) return { ok: false, error: `Could not load business parameters: ${paramError.message}` };
+  // See createDoorRegisterQuote above — same security-definer read, same refusal
+  // on an incomplete parameter set.
+  const { parameters, error: paramError } = await loadSnapshotParameters(supabase);
+  if (paramError) return { ok: false, error: paramError };
 
-  const parameters = (paramRows as BusinessParameterRow[]) ?? [];
   const quoteDate = new Date().toISOString().slice(0, 10);
-  const parametersSnapshot = buildParametersSnapshot(parameters);
-  const fxSnapshot = buildFxSnapshot(parameters, quoteDate);
+  let parametersSnapshot;
+  let fxSnapshot;
+  try {
+    parametersSnapshot = buildParametersSnapshot(parameters);
+    fxSnapshot = buildFxSnapshot(parameters, quoteDate);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Could not snapshot the pricing parameters." };
+  }
 
   const year = Number(quoteDate.slice(0, 4));
   const { data: existingRefRows, error: refError } = await supabase

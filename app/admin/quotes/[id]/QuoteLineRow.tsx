@@ -1,7 +1,8 @@
 "use client";
 
 import { useActionState, useState, useTransition } from "react";
-import { CURRENCY_CODES, type QuoteLineItemWithDetails, type SupplierRow } from "@/lib/supabase/types";
+import { CURRENCY_CODES } from "@/lib/supabase/types";
+import type { QuoteLineRowCosts, QuoteLineRowView } from "./quoteLineView";
 import { formatUsd } from "@/lib/quotes/format";
 import { deleteQuoteLine, updateQuoteLine } from "./lineItemActions";
 import { initialQuoteLineActionResult } from "./lineItemActionState";
@@ -13,30 +14,23 @@ const labelClass = "block text-xs font-medium uppercase tracking-wide text-verid
 /**
  * One line_item-mode quote line, with inline edit/remove (Task 17).
  *
- * `showCosts` is the founder/staff switch. When false the Landed USD cell is
- * not rendered (the number is still passed in from the server page, which
- * itself only passes it when the viewer is a founder), and the inline editor —
- * which contains unit cost and cost currency fields — is unreachable. The
- * matching server action re-checks the role regardless.
+ * THE COST SWITCH IS THE `costs` PROP ITSELF. `line` is a cost-free DTO (see
+ * ./quoteLineView.ts) with no `unit_cost` / `landed_cost_usd` / `cost_currency`
+ * field and no way to acquire one, so a staff viewer's RSC flight payload
+ * carries the label, quantity and CLIENT prices and nothing else. The inline
+ * editor — which writes unit cost — only exists when `costs` was supplied, and
+ * `updateQuoteLine` / `deleteQuoteLine` re-check the role server-side anyway.
  */
 export function QuoteLineRow({
   quoteId,
   line,
-  suppliers,
-  landedCostUsd,
-  clientPriceUsd,
-  clientPriceJmd,
   isDraft,
-  showCosts = true,
+  costs,
 }: {
   quoteId: string;
-  line: QuoteLineItemWithDetails;
-  suppliers: SupplierRow[];
-  landedCostUsd: number | null;
-  clientPriceUsd: number | null;
-  clientPriceJmd: number | null;
+  line: QuoteLineRowView;
   isDraft: boolean;
-  showCosts?: boolean;
+  costs?: QuoteLineRowCosts | null;
 }) {
   const [editing, setEditing] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -46,8 +40,7 @@ export function QuoteLineRow({
     initialQuoteLineActionResult
   );
 
-  const label = line.products?.description ?? line.description_override ?? "Line item";
-  const isAdHoc = !line.product_id;
+  const label = line.label;
 
   function handleDelete() {
     if (!window.confirm(`Remove "${label}" from this quote?`)) return;
@@ -58,12 +51,12 @@ export function QuoteLineRow({
     });
   }
 
-  if (editing) {
+  if (editing && costs) {
     return (
       <tr className="border-b border-veridan-warm-gray-light last:border-b-0">
         <td colSpan={6} className="px-4 py-4">
           <form action={formAction} className="grid gap-3 sm:grid-cols-5">
-            {isAdHoc ? (
+            {line.isAdHoc ? (
               <div className="sm:col-span-5">
                 <label className={labelClass} htmlFor={`desc-${line.id}`}>
                   Description
@@ -72,7 +65,7 @@ export function QuoteLineRow({
                   id={`desc-${line.id}`}
                   type="text"
                   name="description"
-                  defaultValue={line.description_override ?? ""}
+                  defaultValue={costs.descriptionOverride ?? ""}
                   required
                   className={`${inputClass} mt-1`}
                 />
@@ -87,13 +80,13 @@ export function QuoteLineRow({
               <select
                 id={`supplier-${line.id}`}
                 name="supplier_id"
-                defaultValue={line.supplier_id ?? ""}
+                defaultValue={costs.supplierId ?? ""}
                 className={`${inputClass} mt-1`}
               >
                 <option value="" disabled>
                   Choose…
                 </option>
-                {suppliers.map((s) => (
+                {costs.suppliers.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name}
                   </option>
@@ -124,7 +117,7 @@ export function QuoteLineRow({
                 name="unit_cost"
                 step="any"
                 min="0"
-                defaultValue={line.unit_cost}
+                defaultValue={costs.unitCost}
                 className={`${inputClass} mt-1`}
               />
             </div>
@@ -132,7 +125,12 @@ export function QuoteLineRow({
               <label className={labelClass} htmlFor={`currency-${line.id}`}>
                 Currency
               </label>
-              <select id={`currency-${line.id}`} name="cost_currency" defaultValue={line.cost_currency} className={`${inputClass} mt-1`}>
+              <select
+                id={`currency-${line.id}`}
+                name="cost_currency"
+                defaultValue={costs.costCurrency}
+                className={`${inputClass} mt-1`}
+              >
                 {CURRENCY_CODES.map((c) => (
                   <option key={c} value={c}>
                     {c}
@@ -171,8 +169,8 @@ export function QuoteLineRow({
     <tr className="border-b border-veridan-warm-gray-light last:border-b-0">
       <td className="px-4 py-2 text-veridan-ink">
         {label}
-        {isAdHoc && <span className="ml-2 rounded-full bg-veridan-warm-gray-pale px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-veridan-warm-gray">ad-hoc</span>}
-        <p className="text-xs text-veridan-warm-gray">{line.suppliers?.name ?? "Unknown supplier"}</p>
+        {line.isAdHoc && <span className="ml-2 rounded-full bg-veridan-warm-gray-pale px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-veridan-warm-gray">ad-hoc</span>}
+        <p className="text-xs text-veridan-warm-gray">{line.supplierName ?? "Unknown supplier"}</p>
         {deleteError && (
           <p role="alert" className="mt-1 text-xs text-red-600">
             {deleteError}
@@ -180,15 +178,15 @@ export function QuoteLineRow({
         )}
       </td>
       <td className="px-4 py-2 text-right text-veridan-warm-gray">{line.qty}</td>
-      {showCosts && (
-        <td className="px-4 py-2 text-right text-veridan-ink">{formatUsd(landedCostUsd ?? line.landed_cost_usd)}</td>
+      {costs && (
+        <td className="px-4 py-2 text-right text-veridan-ink">{formatUsd(costs.landedCostUsd ?? 0)}</td>
       )}
-      <td className="px-4 py-2 text-right text-veridan-ink">{clientPriceUsd != null ? formatUsd(clientPriceUsd) : "—"}</td>
+      <td className="px-4 py-2 text-right text-veridan-ink">{line.clientPriceUsd != null ? formatUsd(line.clientPriceUsd) : "—"}</td>
       <td className="px-4 py-2 text-right font-medium text-veridan-ink">
-        {clientPriceJmd != null ? `J$${clientPriceJmd.toLocaleString("en-US", { maximumFractionDigits: 2 })}` : "—"}
+        {line.clientPriceJmd != null ? `J$${line.clientPriceJmd.toLocaleString("en-US", { maximumFractionDigits: 2 })}` : "—"}
       </td>
       <td className="px-4 py-2 text-right">
-        {isDraft && showCosts && (
+        {isDraft && costs && (
           <div className="flex justify-end gap-3">
             <button
               type="button"

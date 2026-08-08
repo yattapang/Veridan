@@ -24,9 +24,10 @@ import {
   planOriginRegroup,
   supplierOriginKey,
   supplierOriginLabelMap,
-  type SupplierOriginFields,
   type QuoteState,
+  type SupplierOriginFields,
 } from "./mapping";
+import { loadQuoteOriginSuppliers } from "./snapshotSource";
 
 // A loosely-typed client is fine here — this repo has no generated DB types
 // yet (see lib/supabase/types.ts header), matching the pattern used across
@@ -236,16 +237,12 @@ export async function regroupLineItemOrigins(
   if (lineError) return { error: lineError.message };
   const lines = (lineRows as Array<{ id: string; supplier_id: string | null }>) ?? [];
 
+  // Via the security-definer helper, not a direct read of the founder-only
+  // `suppliers` table: a zero-row RLS result here would silently collapse every
+  // origin pool and re-point every line at nothing. See lib/quotes/snapshotSource.ts.
   const supplierIds = [...new Set(lines.map((l) => l.supplier_id).filter((v): v is string => Boolean(v)))];
-  let suppliers: SupplierOriginFields[] = [];
-  if (supplierIds.length > 0) {
-    const { data: supplierRows, error: supplierError } = await supabase
-      .from("suppliers")
-      .select("id, origin_region, country")
-      .in("id", supplierIds);
-    if (supplierError) return { error: supplierError.message };
-    suppliers = (supplierRows as SupplierOriginFields[]) ?? [];
-  }
+  const { suppliers, error: supplierError } = await loadQuoteOriginSuppliers(supabase, supplierIds);
+  if (supplierError) return { error: supplierError };
 
   const groups = buildOriginGroups(suppliers);
   const supplierToLabel = supplierOriginLabelMap(groups);

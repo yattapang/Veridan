@@ -67,14 +67,26 @@ function SimpleActionButton({
   );
 }
 
+/**
+ * `founder` hides the two client-facing / cost-bearing controls (Send quote,
+ * Create revision) — see the decision table in workflowActions.ts. UX only:
+ * `sendQuote` and `createRevision` each re-derive the role for themselves, so
+ * hiding the buttons is not what stops a staff member calling them.
+ *
+ * Approve / Mark accepted are likewise founder-gated in the action; they are
+ * left visible so the error explains itself, which matches how those two
+ * already behaved before this change.
+ */
 export function WorkflowPanel({
   quoteId,
   status,
   defaultRecipientEmail,
+  founder,
 }: {
   quoteId: string;
   status: QuoteStatus;
   defaultRecipientEmail: string | null;
+  founder: boolean;
 }) {
   const [sendState, sendAction, sendPending] = useActionState(
     sendQuote.bind(null, quoteId),
@@ -85,7 +97,7 @@ export function WorkflowPanel({
     initialWorkflowActionResult,
   );
 
-  const canRevise = status !== "draft";
+  const canRevise = status !== "draft" && founder;
 
   return (
     <div className="space-y-6">
@@ -124,7 +136,7 @@ export function WorkflowPanel({
         )}
       </div>
 
-      {status === "approved" && (
+      {status === "approved" && founder && (
         <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-4">
           <p className="mb-3 text-xs text-amber-800">
             Quote emails send from <code>quotes@veridanlimited.com</code>. Replies go to the

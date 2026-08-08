@@ -1,11 +1,14 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import type { ItemGroupRow, ProductWithSupplier, SupplierRow } from "@/lib/supabase/types";
-import type { ManagedProductCategory } from "@/lib/products/categoriesLoader";
-import type { DistinctFinishValues } from "@/lib/products/finishes";
+import type {
+  ProductListItemCosts,
+  ProductListItemView,
+} from "./productView";
 import { setProductActive } from "./actions";
 import { ProductForm } from "./ProductForm";
+
+export type { ProductPriceProvenance } from "./productView";
 
 function formatCost(unitCost: number, currency: string) {
   return `${currency} ${unitCost.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
@@ -15,36 +18,26 @@ function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
 }
 
-/** Task 40 — read-only provenance for a product's most recent scanned price update. */
-export interface ProductPriceProvenance {
-  effectiveDate: string;
-  fileName: string;
-  fileUrl: string | null;
-}
-
 /**
- * `showCosts` is the founder/staff switch. For staff the unit-cost line, the
- * price-file provenance line (which names the supplier price list a cost came
- * from) and the Edit / Archive controls are all withheld — editing a product IS
+ * One row of the Hardware Library.
+ *
+ * THE COST SWITCH IS THE `costs` PROP ITSELF, not a boolean. `product` is a
+ * cost-free DTO (see ./productView.ts) — it has no `unit_cost` field and cannot
+ * be given one — so a staff viewer's RSC flight payload contains no supplier
+ * cost, no cost currency, no supplier identity and no price-file provenance,
+ * rather than containing them and declining to draw them. The server simply
+ * omits `costs` for a staff session; there is nothing left to hide.
+ *
+ * The inline edit form lives behind the same gate because editing a product IS
  * cost entry. createProduct / updateProduct / setProductActive re-check the role
- * server-side regardless.
+ * server-side regardless — this is presentation, not the boundary.
  */
 export function ProductListItem({
   product,
-  suppliers,
-  itemGroups,
-  productCategories,
-  distinctFinishes,
-  priceProvenance,
-  showCosts = true,
+  costs,
 }: {
-  product: ProductWithSupplier;
-  suppliers: SupplierRow[];
-  itemGroups: ItemGroupRow[];
-  productCategories: ManagedProductCategory[];
-  distinctFinishes: DistinctFinishValues;
-  priceProvenance?: ProductPriceProvenance | null;
-  showCosts?: boolean;
+  product: ProductListItemView;
+  costs?: ProductListItemCosts | null;
 }) {
   const [editing, setEditing] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -58,15 +51,15 @@ export function ProductListItem({
     });
   }
 
-  if (editing) {
+  if (editing && costs) {
     return (
       <li className="border-b border-veridan-warm-gray-light py-4 last:border-b-0">
         <ProductForm
-          product={product}
-          suppliers={suppliers}
-          itemGroups={itemGroups}
-          productCategories={productCategories}
-          distinctFinishes={distinctFinishes}
+          product={costs.row}
+          suppliers={costs.suppliers}
+          itemGroups={costs.itemGroups}
+          productCategories={costs.productCategories}
+          distinctFinishes={costs.distinctFinishes}
           onSaved={() => setEditing(false)}
         />
         <button
@@ -92,40 +85,38 @@ export function ProductListItem({
           )}
         </div>
         <p className="mt-1 text-xs text-veridan-warm-gray">
-          {product.generic_category.replace("_", " ")}
+          {product.genericCategory.replace("_", " ")}
           {product.manufacturer ? ` · ${product.manufacturer}` : ""}
-          {product.product_ref ? ` · ${product.product_ref}` : ""}
-          {product.catalogue_ref ? ` · cat# ${product.catalogue_ref}` : ""}
+          {product.productRef ? ` · ${product.productRef}` : ""}
+          {product.catalogueRef ? ` · cat# ${product.catalogueRef}` : ""}
         </p>
         <p className="mt-1 text-xs text-veridan-ink/70">
-          {showCosts
-            ? `${formatCost(product.unit_cost, product.cost_currency)} / ${product.unit}`
+          {costs
+            ? `${formatCost(costs.unitCost, costs.costCurrency)} / ${product.unit}`
             : `per ${product.unit}`}
-          {product.suppliers ? ` · ${product.suppliers.name}` : ""}
+          {product.supplierName ? ` · ${product.supplierName}` : ""}
         </p>
-        {(product.item_groups || product.finish_code || product.design_series) && (
+        {(product.itemGroupLabel || product.finishCode || product.designSeries) && (
           <p className="mt-1 text-xs text-veridan-warm-gray">
-            {product.item_groups
-              ? `${product.item_groups.family_name}${product.item_groups.grade ? ` (${product.item_groups.grade})` : ""}`
-              : ""}
-            {product.finish_code ? ` · supplied finish code ${product.finish_code}` : ""}
-            {product.design_series ? ` · ${product.design_series}` : ""}
+            {product.itemGroupLabel ?? ""}
+            {product.finishCode ? ` · supplied finish code ${product.finishCode}` : ""}
+            {product.designSeries ? ` · ${product.designSeries}` : ""}
           </p>
         )}
-        {showCosts && priceProvenance && (
+        {costs?.priceProvenance && (
           <p className="mt-1 text-[11px] text-veridan-warm-gray">
-            Last updated {formatDate(priceProvenance.effectiveDate)} from{" "}
-            {priceProvenance.fileUrl ? (
+            Last updated {formatDate(costs.priceProvenance.effectiveDate)} from{" "}
+            {costs.priceProvenance.fileUrl ? (
               <a
-                href={priceProvenance.fileUrl}
+                href={costs.priceProvenance.fileUrl}
                 target="_blank"
                 rel="noreferrer"
                 className="text-veridan-accent underline underline-offset-2 hover:text-veridan-accent-soft"
               >
-                {priceProvenance.fileName}
+                {costs.priceProvenance.fileName}
               </a>
             ) : (
-              priceProvenance.fileName
+              costs.priceProvenance.fileName
             )}
           </p>
         )}
@@ -137,15 +128,15 @@ export function ProductListItem({
       </div>
 
       <div className="flex shrink-0 items-center gap-3">
-        {showCosts && product.item_group_id && (
+        {costs && product.itemGroupId && (
           <a
-            href={`/admin/products/compare/${product.item_group_id}`}
+            href={`/admin/products/compare/${product.itemGroupId}`}
             className="text-xs font-medium text-veridan-accent underline underline-offset-2 hover:text-veridan-accent-soft"
           >
             Compare offerings
           </a>
         )}
-        {showCosts && (
+        {costs && (
           <>
             <button
               type="button"

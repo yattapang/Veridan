@@ -49,7 +49,24 @@
 --     Supabase Auth user (ban_duration, via the service-role admin API), so an
 --     in-flight session stops working on its next server round-trip rather than
 --     lasting until the access token expires.
+--
+--   * >>> EMAIL SIGN-UPS MUST BE DISABLED <<< (cannot be done in SQL — Supabase
+--     dashboard → Authentication → Providers → Email → turn "Enable sign ups"
+--     OFF; also confirm Authentication → Providers has no social provider
+--     enabled). Access to this admin is INVITE-ONLY by design: a person gets in
+--     only when a founder invites them from /admin/team, which is the only code
+--     path that creates their public.users row. lib/roles/session.ts now DENIES
+--     any authenticated session that has no public.users row (deny by default),
+--     so a self-registered account would already be refused at the app layer —
+--     but leaving sign-ups on would still let strangers create Supabase Auth
+--     users against this project and hammer the login route. Turn it off.
+--
+--   * RE-RUNNABLE: the whole file is wrapped in `begin; … commit;` and every
+--     statement is idempotent (`if not exists` / `drop … if exists` first), so
+--     a half-applied or repeated run is safe and simply converges.
 -- ============================================================================
+
+begin;
 
 -- ----------------------------------------------------------------------------
 -- 1. public.users — role constraint, active flag, invite/deactivation stamps
@@ -65,6 +82,8 @@ update public.users
    set role = 'founder'
  where role is distinct from 'staff';
 
+alter table public.users
+  drop constraint if exists users_role_check;
 alter table public.users
   add constraint users_role_check check (role in ('founder', 'staff'));
 
@@ -162,14 +181,17 @@ comment on function public.is_founder() is
 -- ----------------------------------------------------------------------------
 drop policy if exists users_founder_all on public.users;
 
+drop policy if exists users_select_authenticated on public.users;
 create policy users_select_authenticated on public.users
   for select to authenticated
   using (true);
 
+drop policy if exists users_insert_self on public.users;
 create policy users_insert_self on public.users
   for insert to authenticated
   with check (id = auth.uid());
 
+drop policy if exists users_update_self on public.users;
 create policy users_update_self on public.users
   for update to authenticated
   using (id = auth.uid())
@@ -194,10 +216,22 @@ grant update (email, display_name)     on public.users to authenticated;
 -- This trigger is the backstop: it makes "zero active founders" unreachable even
 -- from the SQL editor or a service-role script. Statement-level so a single
 -- multi-row UPDATE is judged on its end state, not row by row.
+--
+-- SECURITY DEFINER, and not optional: the count(*) below must see EVERY row in
+-- public.users, not the subset the invoking session's RLS policies expose. Today
+-- users_select_authenticated is `using (true)` so an invoker-rights count would
+-- happen to be right — but the moment that policy is narrowed (e.g. "staff see
+-- only themselves"), an invoker-rights count would return 0 for a staff session
+-- and this trigger would raise on every ordinary users UPDATE, i.e. it would
+-- break the first-login sync for every staff member. `set search_path = public`
+-- pins name resolution so a definer-rights function cannot be redirected at a
+-- shadow `users` table via a caller-controlled search_path.
 -- ----------------------------------------------------------------------------
 create or replace function public.assert_active_founder_remains()
 returns trigger
 language plpgsql
+security definer
+set search_path = public
 as $$
 begin
   if (select count(*) from public.users where role = 'founder' and active) = 0 then
@@ -208,6 +242,7 @@ begin
 end;
 $$;
 
+drop trigger if exists users_keep_one_active_founder on public.users;
 create trigger users_keep_one_active_founder
   after update or delete on public.users
   for each statement execute function public.assert_active_founder_remains();
@@ -227,7 +262,7 @@ create trigger users_keep_one_active_founder
 -- invitee has ever signed in, and the row must stay readable as a historical
 -- record even if the address later changes.
 -- ----------------------------------------------------------------------------
-create table public.user_admin_audit_log (
+create table if not exists public.user_admin_audit_log (
   id              uuid primary key default gen_random_uuid(),
   target_user_id  uuid references public.users (id) on delete set null,
   target_email    text not null,
@@ -240,18 +275,37 @@ create table public.user_admin_audit_log (
   changed_at      timestamptz not null default now(),
   reason          text
 );
-create index idx_user_admin_audit_log_target_user_id on public.user_admin_audit_log (target_user_id);
-create index idx_user_admin_audit_log_changed_by on public.user_admin_audit_log (changed_by);
-create index idx_user_admin_audit_log_changed_at on public.user_admin_audit_log (changed_at desc);
+create index if not exists idx_user_admin_audit_log_target_user_id on public.user_admin_audit_log (target_user_id);
+create index if not exists idx_user_admin_audit_log_changed_by on public.user_admin_audit_log (changed_by);
+create index if not exists idx_user_admin_audit_log_changed_at on public.user_admin_audit_log (changed_at desc);
 
 alter table public.user_admin_audit_log enable row level security;
 
-create policy user_admin_audit_log_founder_all on public.user_admin_audit_log
-  for all to authenticated
-  using (public.is_founder())
+-- APPEND-ONLY. An audit log a founder can edit is not an audit log: with
+-- `for all` + a blanket update/delete grant, a founder could rewrite (or erase)
+-- the record of who demoted, locked out or deleted whom — including their own
+-- actions. So there are exactly two policies, SELECT and INSERT; there is
+-- deliberately no UPDATE and no DELETE policy, and the grant below withholds
+-- those privileges as well, so the two layers agree. Corrections are made by
+-- appending a new row with a `reason`, never by editing history.
+--
+-- (service_role bypasses RLS and keeps its schema-level privileges, which is
+-- what the /admin/team actions use to WRITE these rows. If an operational
+-- deletion is ever genuinely required it has to be done deliberately with the
+-- service key, not silently through the app's own authenticated session.)
+drop policy if exists user_admin_audit_log_founder_all on public.user_admin_audit_log;
+drop policy if exists user_admin_audit_log_founder_select on public.user_admin_audit_log;
+create policy user_admin_audit_log_founder_select on public.user_admin_audit_log
+  for select to authenticated
+  using (public.is_founder());
+
+drop policy if exists user_admin_audit_log_founder_insert on public.user_admin_audit_log;
+create policy user_admin_audit_log_founder_insert on public.user_admin_audit_log
+  for insert to authenticated
   with check (public.is_founder());
 
-grant select, insert, update, delete on public.user_admin_audit_log to authenticated;
+revoke all on public.user_admin_audit_log from authenticated;
+grant select, insert on public.user_admin_audit_log to authenticated;
 
 -- ----------------------------------------------------------------------------
 -- 6. Founder-only DATA tables — RLS now actually checks the role
@@ -272,9 +326,15 @@ grant select, insert, update, delete on public.user_admin_audit_log to authentic
 -- session that queries PostgREST directly. Hiding those would need per-column
 -- grants (which cannot distinguish founder from staff — both are the `authenticated`
 -- DB role) or a parallel set of cost-free views wired through every founder page.
--- They are hidden at the app layer (lib/roles/matrix.ts canViewCosts + the field
--- guards in app/admin/**), which stops the realistic threat: a staff member using
--- the admin UI. Closing it at the DB needs a views refactor — out of scope here.
+-- They are hidden at the app layer (lib/roles/matrix.ts canViewCosts + the
+-- cost-free DTOs in app/admin/**, which strip the fields BEFORE they can reach a
+-- client component's props / the RSC flight payload), which stops the realistic
+-- threat: a staff member using the admin UI or reading view-source. Closing it at
+-- the DB needs a views refactor — out of scope here.
+--
+-- WHAT IS *NOT* A LIMITATION, and is closed below: every table and bucket whose
+-- WHOLE PURPOSE is cost, price history, invoicing, expenses or supplier data.
+-- Those have no legitimate staff read at all, so they are closed outright.
 -- ----------------------------------------------------------------------------
 drop policy if exists business_parameters_founder_all on public.business_parameters;
 create policy business_parameters_founder_all on public.business_parameters
@@ -317,3 +377,187 @@ create policy actual_costs_founder_all on public.actual_costs
 drop policy if exists extracted_prices_founder_all on public.extracted_prices;
 create policy extracted_prices_founder_all on public.extracted_prices
   for all to authenticated using (public.is_founder()) with check (public.is_founder());
+
+-- ----------------------------------------------------------------------------
+-- 6b. The surfaces the first pass missed (security review, 2026-08-08)
+--
+-- Each of these was still `for all to authenticated using (true)` from an
+-- earlier migration, which means a staff JWT plus the PUBLIC anon key reads it
+-- straight off PostgREST/Storage with no app code involved. They are listed with
+-- the migration that created the open policy, so the pair is easy to audit.
+-- ----------------------------------------------------------------------------
+
+-- product_price_history (20260718000001_price_ingestion.sql:82) — one row per
+-- price change, each carrying unit_cost + cost_currency. This IS the historical
+-- supplier cost book: strictly MORE sensitive than products.unit_cost, because
+-- it exposes the trend as well as today's number.
+drop policy if exists product_price_history_founder_all on public.product_price_history;
+create policy product_price_history_founder_all on public.product_price_history
+  for all to authenticated using (public.is_founder()) with check (public.is_founder());
+
+-- invoice_line_items (20260807000003_standalone_invoices.sql:116) — `invoices`
+-- was tightened above but its CHILD rows were not, so every line, quantity and
+-- amount of every client invoice was still readable. Closing the parent while
+-- leaving the children open closes nothing.
+drop policy if exists invoice_line_items_founder_all on public.invoice_line_items;
+create policy invoice_line_items_founder_all on public.invoice_line_items
+  for all to authenticated using (public.is_founder()) with check (public.is_founder());
+
+-- payments (20260713000002_rls.sql:104) — the ORIGINAL Phase 1 payments table
+-- (invoice_id, amount_jmd, method, recorded_by). Superseded in the app by
+-- invoice_payments (tightened above) but the table and its wide-open policy both
+-- still exist, so it was a second, quieter door onto client payment history.
+-- Tightened for the same reason invoice_payments is.
+drop policy if exists payments_founder_all on public.payments;
+create policy payments_founder_all on public.payments
+  for all to authenticated using (public.is_founder()) with check (public.is_founder());
+
+-- expense_categories (20260807000002_expenses.sql:92) — the taxonomy of company
+-- spend. `expenses` itself is founder-only above; the category list is part of
+-- the same founder-only area (/admin/expenses/categories) and leaks the shape of
+-- the company's cost base on its own.
+drop policy if exists expense_categories_founder_all on public.expense_categories;
+create policy expense_categories_founder_all on public.expense_categories
+  for all to authenticated using (public.is_founder()) with check (public.is_founder());
+
+-- suppliers (20260713000002_rls.sql:56) — lib/roles/matrix.ts declares the
+-- suppliers AREA founder-only ("supplier terms/currencies sit directly against
+-- cost"), but the table was still open, so the page guard was the only thing
+-- stopping a staff session reading the whole supplier ledger from PostgREST.
+--
+-- CONSEQUENCE, accepted deliberately: staff no longer see supplier NAMES
+-- anywhere either — the product list and quote line rows fall back to their
+-- existing "no supplier" rendering. Quote creation still works for staff because
+-- the only supplier fields that pipeline needs (origin_region / country, to group
+-- shipment origin pools) come from the security-definer helper in §7 below, not
+-- from a direct read of this table.
+drop policy if exists suppliers_founder_all on public.suppliers;
+create policy suppliers_founder_all on public.suppliers
+  for all to authenticated using (public.is_founder()) with check (public.is_founder());
+
+-- ----------------------------------------------------------------------------
+-- 6c. Storage buckets holding the same class of data
+--
+-- A storage policy is just an RLS policy on storage.objects, so the same
+-- `using (true)`-shaped hole existed there: both of these were scoped only by
+-- bucket_id, i.e. any authenticated session could list and download every object.
+-- Rewritten as `bucket_id = '<bucket>' and public.is_founder()`.
+--
+-- The OTHER buckets are deliberately left as they are: enquiry-uploads (client
+-- intake — staff triage enquiries), quote-pdfs (the client-facing quote document,
+-- which contains client prices, never costs — staff send/track quotes),
+-- article-source-uploads / article-hero-images / catalogue-files / brand-logos /
+-- install-photos (marketing content, some already anon-readable by design).
+-- ----------------------------------------------------------------------------
+
+-- price-files (20260713000002_rls.sql:201) — the RAW supplier price lists every
+-- extracted_prices row was scanned out of. Closing extracted_prices while leaving
+-- the source PDFs downloadable would be theatre.
+drop policy if exists price_files_founder_all on storage.objects;
+create policy price_files_founder_all on storage.objects
+  for all to authenticated
+  using (bucket_id = 'price-files' and public.is_founder())
+  with check (bucket_id = 'price-files' and public.is_founder());
+
+-- invoice-pdfs (20260718000002_invoicing.sql:182) — rendered client invoices.
+drop policy if exists invoice_pdfs_founder_all on storage.objects;
+create policy invoice_pdfs_founder_all on storage.objects
+  for all to authenticated
+  using (bucket_id = 'invoice-pdfs' and public.is_founder())
+  with check (bucket_id = 'invoice-pdfs' and public.is_founder());
+
+-- ----------------------------------------------------------------------------
+-- 7. Security-definer read paths for the two things STAFF LEGITIMATELY NEED
+--    out of founder-only tables
+--
+-- Staff create quotes. That is the founder's explicit intent, and it is why
+-- quotes / quote_line_items / projects stay open to them. But quote creation
+-- reads two founder-only tables as PRICING INPUTS:
+--
+--   * business_parameters — frozen into quotes.parameters_snapshot /
+--     fx_snapshot at creation (§1.7). Without it a staff-created quote is
+--     priced off nothing.
+--   * suppliers.origin_region / country — used ONLY to group the quote's
+--     suppliers into shipment-origin cost pools.
+--
+-- Under RLS an unauthorised SELECT does not error: it returns ZERO ROWS with
+-- error = null. So without these functions a staff member clicking "Create
+-- quote" would get a quote silently built from hard-coded fallback defaults and
+-- with zero line items — wrong numbers, frozen forever, no error anywhere. That
+-- is a worse outcome than a refusal, and it is exactly what these two functions
+-- prevent.
+--
+-- Both are SECURITY DEFINER, `stable`, `set search_path = public`, return only
+-- the columns the snapshot pipeline actually needs, and take no caller-supplied
+-- SQL. Direct table access stays founder-only: the parameters SCREEN, the
+-- supplier ledger, and every other read of these tables are unaffected.
+-- ----------------------------------------------------------------------------
+
+-- Exactly the keys lib/quotes/snapshot.ts reads (buildParametersSnapshot +
+-- buildFxSnapshot), and nothing else. Keep this list in step with
+-- SNAPSHOT_PARAMETER_KEYS in lib/quotes/snapshot.ts — the TS side now HARD
+-- ERRORS if any of them is missing, so an out-of-step list fails loudly at the
+-- first quote creation rather than silently substituting a default.
+create or replace function public.snapshot_business_parameters()
+returns setof public.business_parameters
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select *
+    from public.business_parameters
+   where key = any (array[
+           'duty_gct_pct',
+           'marine_insurance_pct',
+           'brokerage_first_pallet_usd',
+           'brokerage_addl_pallet_usd',
+           'port_handling_usd',
+           'freight_insurance_fallback_usd',
+           'procurement_handling_fee_usd',
+           'contingency_pct',
+           'margin_tiers',
+           'margin_floor_pct',
+           'min_order_value_usd',
+           'deposit_standard_pct',
+           'quote_validity_days',
+           'default_finish',
+           'gct_enabled',
+           'gct_rate_pct',
+           'lead_times',
+           'company_details',
+           'fx_bank_sell_rate_usd_jmd',
+           'fx_risk_buffer_pct',
+           'supplier_fx_rates'
+         ])
+   order by key;
+$$;
+
+revoke all on function public.snapshot_business_parameters() from public;
+grant execute on function public.snapshot_business_parameters() to authenticated, service_role;
+
+comment on function public.snapshot_business_parameters() is
+  'Read-only, founder-independent view of the pricing parameters a quote snapshot freezes (§1.7). Exists so a STAFF member creating a quote gets the real rates instead of a silent zero-row read; the business_parameters TABLE itself stays founder-only, as does the /admin/parameters screen that edits it.';
+
+-- Output columns are deliberately prefixed so they cannot collide with the
+-- selected column names inside the body (a RETURNS TABLE output name and a
+-- same-named column are ambiguous in a LANGUAGE sql body).
+create or replace function public.quote_origin_suppliers(p_supplier_ids uuid[])
+returns table (supplier_id uuid, supplier_origin_region text, supplier_country text)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select s.id, s.origin_region, s.country
+    from public.suppliers s
+   where s.id = any (coalesce(p_supplier_ids, array[]::uuid[]));
+$$;
+
+revoke all on function public.quote_origin_suppliers(uuid[]) from public;
+grant execute on function public.quote_origin_suppliers(uuid[]) to authenticated, service_role;
+
+comment on function public.quote_origin_suppliers(uuid[]) is
+  'Origin-grouping fields (region/country) for the given suppliers — the minimum a staff-created quote needs to build its shipment-origin cost pools. Deliberately excludes name, notes, default_currency, lead times and every other column of the founder-only supplier ledger.';
+
+commit;

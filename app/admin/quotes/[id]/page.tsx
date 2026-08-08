@@ -26,6 +26,7 @@ import { QuoteOriginCard } from "./QuoteOriginCard";
 import { MarginPanel, type MarginLine, type PackagePrice } from "./MarginPanel";
 import { AddQuoteLineForm } from "./AddQuoteLineForm";
 import { QuoteLineRow } from "./QuoteLineRow";
+import { toQuoteLineRowView } from "./quoteLineView";
 import { StatusTimeline } from "./StatusTimeline";
 import { WorkflowPanel } from "./WorkflowPanel";
 import { CustomsClearedPanel } from "./CustomsClearedPanel";
@@ -77,7 +78,7 @@ export default async function QuoteBuilderPage({
   // Staff may open a quote, but never its cost/margin internals. `showCosts`
   // drives every removal below; each corresponding server action re-checks the
   // role for itself, so this is presentation, not the boundary.
-  const { showCosts } = await requireAdminArea("quotes");
+  const { showCosts, founder } = await requireAdminArea("quotes");
 
   const { id } = await params;
   const query = await searchParams;
@@ -159,10 +160,14 @@ export default async function QuoteBuilderPage({
           .eq("quote_id", id)
           .order("created_at", { ascending: false })
       : Promise.resolve({ data: [] as OverrideLogWithUser[], error: null }),
-    isLineItemMode
+    // suppliers is founder-only at the DB (20260807000004 §6b) and is only ever
+    // consumed by the founder-only add/edit forms, so a staff render does not
+    // fetch it. Same for the product picker: every row it returns carries
+    // unit_cost, and only the founder-only AddQuoteLineForm uses it.
+    isLineItemMode && showCosts
       ? supabase.from("suppliers").select("*").eq("active", true).order("name")
       : Promise.resolve({ data: [] as SupplierRow[], error: null }),
-    isLineItemMode && hasPickerFilters
+    isLineItemMode && showCosts && hasPickerFilters
       ? productsQuery
       : Promise.resolve({ data: [] as ProductWithSupplier[], error: null }),
     isLineItemMode
@@ -197,7 +202,11 @@ export default async function QuoteBuilderPage({
   // Workflow extras: default send recipient, sent-artifact link, sibling revisions.
   const companyId = quote.projects?.companies?.id ?? null;
   const [defaultRecipientEmail, sentPdfUrl, prevRevisionResult, nextRevisionResult, invoicesResult] = await Promise.all([
-    quote.status === "approved" ? loadDefaultRecipientEmail(supabase, companyId) : Promise.resolve(null),
+    // Only the founder-only "Send quote" form uses this, so it is not looked up
+    // for a staff render (and therefore never serialised into their payload).
+    quote.status === "approved" && founder
+      ? loadDefaultRecipientEmail(supabase, companyId)
+      : Promise.resolve(null),
     signQuotePdfUrl(supabase, quote.pdf_storage_path),
     quote.parent_quote_id
       ? supabase.from("quotes").select("id, quote_ref, revision_number").eq("id", quote.parent_quote_id).maybeSingle()
@@ -519,13 +528,28 @@ export default async function QuoteBuilderPage({
                       <QuoteLineRow
                         key={line.id}
                         quoteId={quote.id}
-                        line={line}
-                        suppliers={suppliers}
-                        landedCostUsd={showCosts ? lr?.landedCostUsd ?? line.landed_cost_usd : null}
-                        showCosts={showCosts}
-                        clientPriceUsd={lr?.clientPriceUsdRounded ?? null}
-                        clientPriceJmd={lr?.clientPriceJmdRounded ?? null}
+                        // Cost-free DTO built HERE, on the server, before
+                        // anything crosses into the client bundle. The full
+                        // `line` row never becomes a prop.
+                        line={toQuoteLineRowView(
+                          line,
+                          lr?.clientPriceUsdRounded ?? null,
+                          lr?.clientPriceJmdRounded ?? null,
+                          { includeSupplierName: showCosts }
+                        )}
                         isDraft={isDraft}
+                        costs={
+                          showCosts
+                            ? {
+                                landedCostUsd: lr?.landedCostUsd ?? line.landed_cost_usd,
+                                unitCost: line.unit_cost,
+                                costCurrency: line.cost_currency,
+                                supplierId: line.supplier_id,
+                                descriptionOverride: line.description_override,
+                                suppliers,
+                              }
+                            : null
+                        }
                       />
                     );
                   })}
@@ -751,7 +775,12 @@ export default async function QuoteBuilderPage({
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">
           Workflow
         </h2>
-        <WorkflowPanel quoteId={quote.id} status={quote.status} defaultRecipientEmail={defaultRecipientEmail} />
+        <WorkflowPanel
+          quoteId={quote.id}
+          status={quote.status}
+          defaultRecipientEmail={founder ? defaultRecipientEmail : null}
+          founder={founder}
+        />
       </section>
     </div>
   );

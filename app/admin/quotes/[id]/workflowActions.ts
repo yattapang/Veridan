@@ -17,11 +17,12 @@ import { uploadQuotePdf } from "@/lib/storage";
 import { renderQuotePdf } from "@/lib/quotes/pdf";
 import { formatValidUntil } from "@/lib/quote-pdf/format";
 import { buildFxSnapshot, buildParametersSnapshot } from "@/lib/quotes/snapshot";
+import { loadSnapshotParameters } from "@/lib/quotes/snapshotSource";
 import { loadQuoteState, recomputeQuote } from "@/lib/quotes/persist";
 import { canEdit, canTransition, nextRevisionNumber, revisionQuoteRef } from "@/lib/quotes/workflow";
 import { generateBalanceInvoiceForQuote, generateDepositInvoiceForQuote } from "@/lib/invoices/generate";
 import { isBeforeCustomsCleared } from "@/lib/orders/workflow";
-import type { BusinessParameterRow, OrderRow, QuoteOriginRow, QuoteRow, QuoteStatus } from "@/lib/supabase/types";
+import type { OrderRow, QuoteOriginRow, QuoteRow, QuoteStatus } from "@/lib/supabase/types";
 import { requireFounderAction } from "@/lib/roles/guards";
 
 export type WorkflowActionResult = { ok: true; error?: undefined } | { ok: false; error: string };
@@ -130,6 +131,13 @@ export async function approveQuote(quoteId: string): Promise<WorkflowActionResul
  * the PDF attached, (4) record sent_at/sent_to + the artifact path. An email
  * failure returns an error and leaves the quote's status at 'approved' —
  * nothing beyond the (harmless, overwrite-on-retry) storage upload persists.
+ *
+ * FOUNDER-ONLY (founder decision, security review 2026-08-08). This is the most
+ * client-facing action in the app: it emails Veridan's priced quote PDF, from
+ * Veridan's address, to whatever address is typed into the box. There is no
+ * recipient allow-list and no undo. "Founders commit client-facing actions" —
+ * staff prepare the quote and a founder sends it. Gated BEFORE the PDF is
+ * rendered or uploaded so a staff call costs nothing and leaves no artifact.
  */
 export async function sendQuote(
   quoteId: string,
@@ -145,6 +153,9 @@ export async function sendQuote(
 
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to send a quote." };
+
+  const founderGate = await requireFounderAction("email a quote to a client");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
 
   const loaded = await loadQuoteForWorkflow(supabase, quoteId);
   if ("error" in loaded) return { ok: false, error: loaded.error };
@@ -249,6 +260,14 @@ export async function acceptQuote(quoteId: string): Promise<WorkflowActionResult
   return { ok: true };
 }
 
+/**
+ * DELIBERATELY STAFF-USABLE (founder decision, security review 2026-08-08).
+ * Recording that the client said no is bookkeeping about something that already
+ * happened outside the app: it sends nothing, bills nothing, and discloses no
+ * cost. Whoever took the call should be able to write it down. The transition
+ * itself is still constrained by `canTransition`, and a declined quote can only
+ * be superseded by a revision — which IS founder-only.
+ */
 export async function declineQuote(quoteId: string): Promise<WorkflowActionResult> {
   return applySimpleTransition(quoteId, "declined", { declined_at: new Date().toISOString() });
 }
@@ -259,6 +278,11 @@ export async function declineQuote(quoteId: string): Promise<WorkflowActionResul
  * isComputedExpired) covers display without touching the row; this action is
  * for a founder who wants the STATUS itself to reflect it (e.g. closing out
  * the pipeline view) rather than leaving it silently flagged forever.
+ *
+ * DELIBERATELY STAFF-USABLE (founder decision, security review 2026-08-08), for
+ * the same reason as declineQuote: it writes down a fact the computed
+ * `isComputedExpired` badge is already showing, and pipeline hygiene is staff
+ * work. Nothing is sent, nothing is billed, no cost is revealed.
  */
 export async function markQuoteExpired(quoteId: string): Promise<WorkflowActionResult> {
   return applySimpleTransition(quoteId, "expired");
@@ -381,6 +405,13 @@ export async function markCustomsCleared(quoteId: string): Promise<WorkflowActio
  * re-derives every USD/JMD cache from whichever fx_snapshot the new draft
  * ends up with, so a refreshed-rates revision's numbers are correct without
  * any manual FX math here.
+ *
+ * FOUNDER-ONLY (founder decision, security review 2026-08-08). Two reasons, and
+ * either would be enough. (1) It clones every line's `unit_cost` and
+ * `cost_currency` into new rows and, with `refresh_rates`, re-freezes the entire
+ * pricing model — that is a cost-bearing action end to end. (2) A revision is
+ * how a quote that has already been SENT gets re-priced, so it is the entry
+ * point to a client-facing conversation. Staff prepare, founders commit.
  */
 export async function createRevision(
   quoteId: string,
@@ -396,6 +427,9 @@ export async function createRevision(
 
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to create a revision." };
+
+  const founderGate = await requireFounderAction("create a quote revision");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
 
   const { state, error: loadError } = await loadQuoteState(supabase, quoteId);
   if (loadError) return { ok: false, error: loadError };
@@ -416,12 +450,22 @@ export async function createRevision(
   let fxSnapshot = quote.fx_snapshot;
 
   if (refreshRates) {
-    const { data: paramRows, error: paramError } = await supabase.from("business_parameters").select("*");
-    if (paramError) return { ok: false, error: `Could not load current parameters: ${paramError.message}` };
-    const parameters = (paramRows as BusinessParameterRow[]) ?? [];
+    // Security-definer read + hard refusal on an incomplete set. This action is
+    // founder-only above, so RLS would not deny the direct table read — but the
+    // second half matters for a founder too: a transient partial read here would
+    // freeze the wrong duty/FX/margin numbers into the new revision forever.
+    const { parameters, error: paramError } = await loadSnapshotParameters(supabase);
+    if (paramError) return { ok: false, error: paramError };
     quoteDate = new Date().toISOString().slice(0, 10);
-    parametersSnapshot = buildParametersSnapshot(parameters);
-    fxSnapshot = buildFxSnapshot(parameters, quoteDate);
+    try {
+      parametersSnapshot = buildParametersSnapshot(parameters);
+      fxSnapshot = buildFxSnapshot(parameters, quoteDate);
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : "Could not snapshot the pricing parameters.",
+      };
+    }
     validityDays = parametersSnapshot.quote_validity_days;
   }
 

@@ -33,12 +33,27 @@ export interface AuthUserFacts {
  *   - there is no authenticated Supabase user at all;
  *   - the row is locked out (`active === false`);
  *   - the row belongs to a removed account (`deleted_at` set) — that row exists
- *     only to keep audit attribution readable, never to grant access.
+ *     only to keep audit attribution readable, never to grant access;
+ *   - THERE IS NO `public.users` ROW AT ALL.
  *
- * When the row has not been created yet (a genuine race: the first-login sync
- * can lose to this read), the fallback carries the LEAST-privileged role. The
- * previous fallback said 'founder', which would have handed a brand-new,
- * unsynced session full founder access the moment a second role existed.
+ * That last one is the fix from the security review of 2026-08-08 (MAJOR-1).
+ * This function used to resolve a row-less session to `{role:"staff",
+ * active:true}` on the reasoning that staff is the least-privileged role. But
+ * least-privileged is not the same as no privilege: staff is a real account with
+ * real access to enquiries, companies, projects, quotes and orders. Combined
+ * with Supabase's default of email sign-ups being ENABLED, that meant anybody
+ * who could reach the project's auth endpoint — the anon key is public by
+ * definition — could register themselves and walk into /admin as staff.
+ *
+ * An unknown session is now REFUSED. Access to this admin is invite-only: a
+ * founder inviting someone from /admin/team creates their `public.users` row in
+ * the same action (app/admin/team/actions.ts), so by the time they follow the
+ * emailed link their row already exists and they sign in normally. Nothing
+ * legitimate depends on the old fallback.
+ *
+ * (The migration header also spells out that email sign-ups must be turned OFF
+ * in the Supabase dashboard. That is defence in depth, not the fix: this
+ * function denies regardless of what the auth provider is configured to allow.)
  */
 export function resolveSessionUser(
   authUser: AuthUserFacts | null | undefined,
@@ -60,11 +75,6 @@ export function resolveSessionUser(
     };
   }
 
-  return {
-    id: authUser.id,
-    email: authUser.email ?? "",
-    display_name: null,
-    role: "staff",
-    active: true,
-  };
+  // No row → not a Veridan user. Deny.
+  return null;
 }

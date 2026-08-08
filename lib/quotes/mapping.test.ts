@@ -228,11 +228,16 @@ describe("snapshot immutability", () => {
     expect(landedFor(newLive)).toBeLessThan(landedAtCreation);
   });
 
-  it("builds a coherent snapshot even from a partially-seeded parameter set", () => {
-    const sparse = buildParametersSnapshot([param("duty_gct_pct", 55, "percent")]);
-    expect(sparse.margin_tiers).toEqual([30, 35, 40]); // seed default
-    expect(sparse.port_handling_usd).toBe(50);
-    expect(sparse.default_finish).toContain("Satin Stainless Steel");
+  it("REFUSES to build a snapshot from a partially-seeded parameter set", () => {
+    // Reversed by the security review of 2026-08-08 (BLOCKER-3b). This used to
+    // assert that a one-row read still produced "a coherent snapshot" out of the
+    // seed defaults. It is coherent, and it is wrong — and because it is frozen
+    // into quotes.parameters_snapshot, it is wrong permanently. Under RLS a
+    // staff session's read of the founder-only business_parameters table returns
+    // zero rows with error === null, so this path was reached by an ordinary
+    // click with nothing reported anywhere. Refusing is the correct outcome; see
+    // snapshot.test.ts for the full set of cases.
+    expect(() => buildParametersSnapshot([param("duty_gct_pct", 55, "percent")])).toThrow();
   });
 
   it("precomputes the effective FX rate in the snapshot (162 × 1.03)", () => {

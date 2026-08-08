@@ -25,6 +25,15 @@ export type CreateOrderResult = { ok: true; orderId: string } | { ok: false; err
  * `orders.quote_id` unique constraint — a double-click (or a second founder
  * clicking at the same time) cannot create two orders for the same quote;
  * the loser is redirected to the existing order instead of erroring.
+ *
+ * DELIBERATELY STAFF-USABLE (founder decision, security review 2026-08-08).
+ * Fulfillment IS staff work — `orders` is a staff-allowed area in
+ * lib/roles/matrix.ts, and someone has to open the order before anyone can track
+ * a shipment against it. The action cannot run until a FOUNDER has already
+ * accepted the quote (`status !== 'accepted'` is refused above), so the
+ * cost-bearing decision has been made by then. The row it inserts carries no
+ * cost fields, and the actual-cost side of the order page (`actual_costs`) is
+ * founder-only in both the UI and RLS.
  */
 export async function createOrder(
   quoteId: string,

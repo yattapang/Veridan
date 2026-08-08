@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getRoleSession } from "@/lib/roles/guards";
+import { requireFounderPage } from "@/lib/roles/guards";
 import { normalizeRole } from "@/lib/roles/matrix";
 import { partitionTeam, teamMemberDisplayName } from "@/lib/roles/display";
 import { countActiveFounders, type TeamMemberSnapshot } from "@/lib/roles/lockout";
@@ -43,15 +43,19 @@ function formatDate(iso: string | null): string {
 }
 
 /**
- * Team management (founder-only — see ./layout.tsx).
+ * Team management (founder-only).
  *
- * Reads with the service-role client because `last_sign_in_at` lives in
- * auth.users, which only the admin API exposes. Everything this page renders is
- * founder-appropriate by construction: nobody else can reach it, and every
- * mutation re-checks the role for itself in ./actions.ts.
+ * Reads with the SERVICE-ROLE client, which bypasses RLS entirely, because
+ * `last_sign_in_at` lives in auth.users and only the admin API exposes it. That
+ * is precisely why this page enforces the role INLINE rather than leaning on
+ * ./layout.tsx (security review 2026-08-08, MINOR): a page that runs
+ * unrestricted service-role queries must not have its only guard sitting in a
+ * different file, one refactor away from being detached. The layout check stays
+ * — two independent checks, neither trusting the other, exactly as
+ * lib/roles/guards.ts describes. Every mutation re-checks again in ./actions.ts.
  */
 export default async function TeamPage() {
-  const session = await getRoleSession();
+  const session = await requireFounderPage("team");
 
   let admin;
   try {
@@ -125,7 +129,7 @@ export default async function TeamPage() {
     deletedAt: row.deleted_at,
     createdAt: row.created_at,
     lastSignInAt: row.deleted_at ? null : lastSignInById.get(row.id) ?? null,
-    isSelf: row.id === session?.user.id,
+    isSelf: row.id === session.user.id,
   }));
 
   const snapshot: TeamMemberSnapshot[] = members.map((m) => ({

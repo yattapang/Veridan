@@ -301,7 +301,19 @@ export async function refreshFxSnapshot(quoteId: string): Promise<FxActionResult
   if (paramError) return { ok: false, error: `Could not load FX parameters: ${paramError.message}` };
 
   const asOf = new Date().toISOString().slice(0, 10);
-  const fxSnapshot = buildFxSnapshot((paramRows as BusinessParameterRow[]) ?? [], asOf);
+  // buildFxSnapshot refuses an incomplete FX parameter set rather than falling
+  // back to 162 JMD/USD + 3% (security review 2026-08-08, BLOCKER-3b). This
+  // action is founder-only, so RLS is not the risk here — a transient partial
+  // read is, and re-freezing a draft at rates nobody chose is not recoverable.
+  let fxSnapshot;
+  try {
+    fxSnapshot = buildFxSnapshot((paramRows as BusinessParameterRow[]) ?? [], asOf);
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Could not snapshot the FX rates.",
+    };
+  }
 
   const { error: updateError } = await supabase.from("quotes").update({ fx_snapshot: fxSnapshot }).eq("id", quoteId);
   if (updateError) return { ok: false, error: `Could not refresh FX: ${updateError.message}` };

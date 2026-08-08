@@ -43,16 +43,37 @@ describe("resolveSessionUser", () => {
     ).toBeNull();
   });
 
-  it("falls back to the LEAST-privileged role when the row has not synced yet", () => {
-    const user = resolveSessionUser(AUTH, null);
-    expect(user).not.toBeNull();
-    expect(user?.role).toBe("staff");
-    expect(normalizeRole(user?.role)).toBe("staff");
-    expect(isFounder(user)).toBe(false);
+  // --- MAJOR-1, security review 2026-08-08 -----------------------------------
+  // A valid Supabase Auth session with NO public.users row is DENIED, not
+  // admitted as staff. It used to resolve to {role:"staff", active:true}, which
+  // — with Supabase's default of email sign-ups being enabled — meant anyone who
+  // could reach the project's auth endpoint could self-register into /admin.
+  // Rows are created only by a founder's invite, so "no row" means "not a
+  // Veridan user".
+  it("DENIES an authenticated session that has no public.users row", () => {
+    expect(resolveSessionUser(AUTH, null)).toBeNull();
+    expect(resolveSessionUser(AUTH, undefined)).toBeNull();
   });
 
-  it("does not invent an email for an unsynced row", () => {
-    expect(resolveSessionUser({ id: "u2", email: null }, null)?.email).toBe("");
+  it("denies a row-less session regardless of what the auth user looks like", () => {
+    expect(resolveSessionUser({ id: "u2", email: null }, null)).toBeNull();
+    expect(resolveSessionUser({ id: "u3", email: "stranger@example.com" }, null)).toBeNull();
+  });
+
+  it("grants nothing on the deny path — not even the least-privileged role", () => {
+    const user = resolveSessionUser({ id: "u4", email: "stranger@example.com" }, null);
+    // isFounder/normalizeRole are the two things every call site derives access
+    // from; both must be safe when handed the denial.
+    expect(isFounder(user)).toBe(false);
+    expect(normalizeRole(user?.role)).toBe("staff");
+    expect(user?.active).toBeUndefined();
+  });
+
+  it("still admits an INVITED user, whose row the invite already created", () => {
+    const invited = resolveSessionUser(AUTH, { ...ROW, role: "staff" });
+    expect(invited).not.toBeNull();
+    expect(invited?.role).toBe("staff");
+    expect(isFounder(invited)).toBe(false);
   });
 
   it("treats a row with no active column (pre-migration) as active", () => {
