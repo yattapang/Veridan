@@ -34,7 +34,8 @@
 
 import type { FxSnapshotStored, ParametersSnapshotStored, QuoteRow } from "@/lib/supabase/types";
 
-function round2(n: number): number {
+/** Exported so other pure invoice modules (e.g. lib/invoices/lineItems.ts) round JMD amounts identically instead of re-implementing the same rounding rule. */
+export function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
 
@@ -86,6 +87,32 @@ export function computeDepositInvoiceAmounts(quote: QuoteForInvoicing): InvoiceA
     amountUsd: usdFromJmd(amountJmd, quote.fx_snapshot),
     fxNote: buildFxNote(quote.fx_snapshot),
   };
+}
+
+/**
+ * Standalone (ad-hoc, no source quote) invoice amounts — founder request
+ * 2026-08-07. `subtotalJmd` is the caller-supplied sum of free-text line
+ * items (lib/invoices/lineItems.ts computeLineItemTotals), not derived from
+ * any quote total. GCT is applied via the SAME `gctForSubtotal` helper
+ * computeDepositInvoiceAmounts/computeBalanceInvoiceAmounts use — there is
+ * exactly one GCT calculation in this file, reused by all three invoice
+ * kinds — but there is no quote's frozen parameters_snapshot to read it
+ * from, so the caller must pass the CURRENT `gct_enabled`/`gct_rate_pct`
+ * business parameters (a standalone invoice has no "quote date" to freeze
+ * against; it is priced live, at creation time, like the numbering sequence
+ * itself). There is no quote fx_snapshot to lock either, so unlike the
+ * deposit/balance amounts there is no informational USD figure or fx_note —
+ * both stay null/absent, exactly as `invoices.amount_usd`/`fx_note` already
+ * allow (both nullable columns).
+ */
+export function computeStandaloneInvoiceAmounts(
+  subtotalJmd: number,
+  gctSnapshot: Pick<ParametersSnapshotStored, "gct_enabled" | "gct_rate_pct">,
+): Pick<InvoiceAmounts, "subtotalJmd" | "gctAmountJmd" | "amountJmd"> {
+  const subtotal = round2(subtotalJmd);
+  const gctAmountJmd = gctForSubtotal(subtotal, gctSnapshot);
+  const amountJmd = round2(subtotal + gctAmountJmd);
+  return { subtotalJmd: subtotal, gctAmountJmd, amountJmd };
 }
 
 /**

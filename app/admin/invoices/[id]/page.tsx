@@ -6,6 +6,7 @@ import { InstructiveMessage } from "@/components/admin/InstructiveMessage";
 import { loadConfiguredPaymentInstructions } from "@/lib/invoices/paymentInstructions";
 import { INVOICE_STATUS_BADGE, INVOICE_STATUS_LABELS, INVOICE_TYPE_LABELS } from "@/lib/invoices/format";
 import { loadInvoiceItemization } from "@/lib/invoices/itemization";
+import { loadStandaloneInvoiceItemization } from "@/lib/invoices/standaloneItemization";
 import { computeRemainingBalanceJmd, sumPayments } from "@/lib/invoices/paymentStatus";
 import { formatCount, formatDoorNumbers, formatJmdWhole, summarizeComposition } from "@/lib/quote-pdf/format";
 import { formatJmd, formatUsd } from "@/lib/quotes/format";
@@ -88,7 +89,11 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
       .order("created_at", { ascending: true }),
     invoice.status === "issued" ? loadDefaultRecipientEmail(supabase, invoice.company_id) : Promise.resolve(null),
     signInvoicePdfUrl(supabase, invoice.pdf_storage_path),
-    invoice.quotes ? loadInvoiceItemization(supabase, invoice.quotes, invoice.invoice_type) : Promise.resolve(null),
+    invoice.quotes
+      ? loadInvoiceItemization(supabase, invoice.quotes, invoice.invoice_type)
+      : invoice.invoice_type === "standalone"
+        ? loadStandaloneInvoiceItemization(supabase, invoice.id)
+        : Promise.resolve(null),
   ]);
   const { data: paymentsData, error: paymentsError } = paymentsResult;
   const paymentsChronological = (paymentsData as InvoicePaymentRow[]) ?? [];
@@ -320,6 +325,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
         <InvoiceActionsPanel
           invoiceId={invoice.id}
           status={invoice.status}
+          invoiceType={invoice.invoice_type}
           defaultRecipientEmail={defaultRecipientEmail}
           sentPdfUrl={sentPdfUrl}
           paymentInstructionsConfigured={paymentInstructionsConfigured}

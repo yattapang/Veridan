@@ -498,8 +498,8 @@ export interface QuoteWithProject extends QuoteRow {
 // Invoicing (Phase 2C, Tasks 44-47) — see 20260718000002_invoicing.sql
 // ---------------------------------------------------------------------------
 
-export type InvoiceType = "deposit" | "balance";
-export const INVOICE_TYPES: InvoiceType[] = ["deposit", "balance"];
+export type InvoiceType = "deposit" | "balance" | "standalone";
+export const INVOICE_TYPES: InvoiceType[] = ["deposit", "balance", "standalone"];
 
 export type InvoiceStatus = "draft" | "issued" | "sent" | "paid" | "partially_paid" | "void";
 export const INVOICE_STATUSES: InvoiceStatus[] = [
@@ -514,7 +514,8 @@ export const INVOICE_STATUSES: InvoiceStatus[] = [
 export interface InvoiceRow {
   id: string;
   invoice_number: string;
-  quote_id: string;
+  /** NULL for a standalone (ad-hoc) invoice — see 20260807000003_standalone_invoices.sql's consistency check: null iff invoice_type = 'standalone'. */
+  quote_id: string | null;
   project_id: string | null;
   company_id: string | null;
   invoice_type: InvoiceType;
@@ -551,6 +552,24 @@ export interface InvoicePaymentRow {
   notes: string | null;
   recorded_by: string | null;
   created_at: string;
+}
+
+/**
+ * A standalone (ad-hoc) invoice's own line item — see
+ * 20260807000003_standalone_invoices.sql. Quote-derived invoices never use
+ * this table; they itemize from `quote_line_items` via
+ * lib/invoices/itemization.ts.
+ */
+export interface InvoiceLineItemRow {
+  id: string;
+  invoice_id: string;
+  description: string;
+  qty: number;
+  unit_price_jmd: number;
+  line_total_jmd: number;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
 }
 
 // ---------------------------------------------------------------------------

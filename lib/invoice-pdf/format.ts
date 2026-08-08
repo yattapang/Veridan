@@ -34,21 +34,27 @@ export function formatInvoiceUsd(amount: number | null | undefined): string {
 export const INVOICE_PDF_TYPE_LABELS: Record<InvoiceType, string> = {
   deposit: "Deposit",
   balance: "Balance",
+  standalone: "Standalone",
 };
 
 /**
- * Builds the deposit/balance context line shown under the amounts table,
- * e.g. "60% deposit against quote VQ-2026-001" or "Balance due against quote
- * VQ-2026-001". `depositPct` is only meaningful for the deposit invoice type
- * (the quote's own `deposit_pct`, never recomputed here) — a balance
- * invoice's line never mentions a percentage since it is defined as "what's
- * left", not a fixed share.
+ * Builds the deposit/balance/standalone context line shown under the amounts
+ * table, e.g. "60% deposit against quote VQ-2026-001" or "Balance due
+ * against quote VQ-2026-001". `depositPct` is only meaningful for the
+ * deposit invoice type (the quote's own `deposit_pct`, never recomputed
+ * here) — a balance invoice's line never mentions a percentage since it is
+ * defined as "what's left", not a fixed share. A standalone invoice has no
+ * source quote at all (20260807000003_standalone_invoices.sql — quote_id is
+ * null), so `quoteRef` is never used for it.
  */
 export function buildDepositContextLine(
   invoiceType: InvoiceType,
   quoteRef: string | null | undefined,
   depositPct: number | null | undefined,
 ): string {
+  if (invoiceType === "standalone") {
+    return "Standalone invoice — not linked to a quote.";
+  }
   const ref = quoteRef?.trim() || "—";
   if (invoiceType === "deposit") {
     const pct = depositPct != null && Number.isFinite(Number(depositPct)) ? Number(depositPct) : null;

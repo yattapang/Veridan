@@ -9,6 +9,7 @@ import type { InvoiceStatus, InvoiceType } from "@/lib/supabase/types";
 export const INVOICE_TYPE_LABELS: Record<InvoiceType, string> = {
   deposit: "Deposit",
   balance: "Balance",
+  standalone: "Standalone",
 };
 
 export const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {

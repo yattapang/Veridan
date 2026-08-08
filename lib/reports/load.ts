@@ -306,7 +306,8 @@ export async function loadCurrentFxRate(supabase: SupabaseServerClient): Promise
 
 interface IssuedInvoiceJoinRow {
   invoice_number: string;
-  quote_id: string;
+  /** Null for a standalone (ad-hoc) invoice — see 20260807000003_standalone_invoices.sql. Still counts as revenue below; it just has no order/quote to label against. */
+  quote_id: string | null;
   /** subtotal + GCT — what the client owes. NOT revenue. */
   amount_jmd: number;
   /** GCT-exclusive. THIS is revenue (see lib/reports/incomeStatement.ts). */
@@ -353,7 +354,8 @@ interface FinancialPaymentJoinRow {
   invoices: {
     invoice_number: string;
     invoice_type: InvoiceType;
-    quote_id: string;
+    /** Null for a standalone (ad-hoc) invoice — see 20260807000003_standalone_invoices.sql. */
+    quote_id: string | null;
     /** Carried so the payment can be pro-rated into its revenue and GCT shares. */
     subtotal_jmd: number | null;
     amount_jmd: number | null;
@@ -468,7 +470,10 @@ export async function loadFinancialStatementData(
         revenueJmd,
         gctJmd: inv.gct_amount_jmd ?? roundJmd(inv.amount_jmd - revenueJmd),
         issuedDateIso,
-        orderId: quoteIdToOrderId.get(inv.quote_id) ?? null,
+        // A standalone invoice has no quote_id (null) and therefore no order
+        // to attribute — it still counts as revenue above, just with no
+        // order/quote label, same as any other unmapped row.
+        orderId: inv.quote_id ? (quoteIdToOrderId.get(inv.quote_id) ?? null) : null,
         quoteRef: inv.quotes?.quote_ref ?? "—",
         invoiceNumber: inv.invoice_number,
         companyName: inv.companies?.name ?? null,

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useActionState, useState, useTransition } from "react";
-import type { InvoiceStatus } from "@/lib/supabase/types";
+import type { InvoiceStatus, InvoiceType } from "@/lib/supabase/types";
 import { issueInvoice, regenerateInvoice, sendInvoice, voidInvoice, type InvoiceActionResult } from "./actions";
 
 const initialResult: InvoiceActionResult = { ok: true };
@@ -109,12 +109,14 @@ function RegenerateButton({ invoiceId }: { invoiceId: string }) {
 export function InvoiceActionsPanel({
   invoiceId,
   status,
+  invoiceType,
   defaultRecipientEmail,
   sentPdfUrl,
   paymentInstructionsConfigured,
 }: {
   invoiceId: string;
   status: InvoiceStatus;
+  invoiceType: InvoiceType;
   defaultRecipientEmail: string | null;
   sentPdfUrl: string | null;
   paymentInstructionsConfigured: boolean;
@@ -124,8 +126,11 @@ export function InvoiceActionsPanel({
   const canSend = status === "issued";
   // MINOR-5 fix: a void invoice is otherwise a dead end — offer a way to
   // create a fresh one for the same quote + type (regenerateInvoice guards
-  // the quote's own state server-side; this button is just visibility).
-  const canRegenerate = status === "void";
+  // the quote's own state server-side; this button is just visibility). A
+  // standalone invoice has no source quote to regenerate FROM (see
+  // regenerateInvoice's own guard in ./actions.ts) — hidden here too so a
+  // founder never sees a button that can only ever error.
+  const canRegenerate = status === "void" && invoiceType !== "standalone";
 
   const [sendState, sendAction, sendPending] = useActionState(sendInvoice.bind(null, invoiceId), initialResult);
 

@@ -32,6 +32,7 @@
  * movement — which is a true statement about the data that exists.
  */
 
+import type { InvoiceType } from "@/lib/supabase/types";
 import { monthKeyFromDateOnly, monthKeysInRange, isWithinReportRange, type ReportDateRange } from "./period";
 
 export interface CashInEntry {
@@ -39,7 +40,8 @@ export interface CashInEntry {
   /** `date`-typed, invoice_payments.paid_at. */
   paidAtIso: string;
   invoiceNumber: string;
-  invoiceType: "deposit" | "balance";
+  /** Includes 'standalone' (20260807000003_standalone_invoices.sql) — a payment against an ad-hoc invoice is real cash in, same as any other. */
+  invoiceType: InvoiceType;
   quoteRef: string;
   method: string | null;
   reference: string | null;

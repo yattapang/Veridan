@@ -15,8 +15,9 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { InvoiceRow, QuoteRow } from "@/lib/supabase/types";
-import { computeBalanceInvoiceAmounts, computeDepositInvoiceAmounts } from "./amounts";
+import type { InvoiceLineItemRow, InvoiceRow, ParametersSnapshotStored, QuoteRow } from "@/lib/supabase/types";
+import { computeBalanceInvoiceAmounts, computeDepositInvoiceAmounts, computeStandaloneInvoiceAmounts } from "./amounts";
+import { computeLineItemTotals, type InvoiceLineItemDraft } from "./lineItems";
 import { formatInvoiceNumber, jamaicaYear } from "./numbering";
 
 type Client = SupabaseClient;
@@ -188,4 +189,143 @@ export async function generateBalanceInvoiceForQuote(
   }
 
   return { ok: true, invoice: data as InvoiceRow, alreadyExisted: false };
+}
+
+// ---------------------------------------------------------------------------
+// Standalone (ad-hoc) invoice generation — founder request 2026-08-07: "a
+// new invoice creation button in case we want to build an invoice from
+// scratch." No quote, no idempotency-by-(quote_id, invoice_type) — every
+// call intentionally creates a brand-new invoice, the same way clicking
+// "Add project" creates a brand-new project every time.
+// ---------------------------------------------------------------------------
+
+export interface StandaloneInvoiceInput {
+  companyId: string;
+  projectId: string | null;
+  lines: InvoiceLineItemDraft[];
+  dueNote: string | null;
+}
+
+/**
+ * Reads the LIVE `gct_enabled`/`gct_rate_pct` business parameters. A
+ * standalone invoice has no source quote to freeze a `parameters_snapshot`
+ * from (that snapshot only exists because a QUOTE was created at some past
+ * date — see lib/quotes/snapshot.ts), so it is priced with whatever GCT
+ * settings are current at the moment the founder clicks "Create invoice",
+ * exactly like the FX/invoice-numbering sequence itself is resolved live at
+ * creation time. Missing/malformed rows fall back to the same seed defaults
+ * lib/quotes/snapshot.ts's buildParametersSnapshot uses (gct_enabled: false,
+ * gct_rate_pct: 15) so a partially-seeded environment still produces a
+ * coherent invoice.
+ */
+async function loadLiveGctSnapshot(
+  supabase: Client,
+): Promise<Pick<ParametersSnapshotStored, "gct_enabled" | "gct_rate_pct">> {
+  const { data } = await supabase
+    .from("business_parameters")
+    .select("key, value")
+    .in("key", ["gct_enabled", "gct_rate_pct"]);
+
+  const rows = (data as { key: string; value?: { value?: unknown } }[] | null) ?? [];
+  const rawFor = (key: string) => rows.find((r) => r.key === key)?.value?.value;
+
+  const gctEnabledRaw = rawFor("gct_enabled");
+  const gctRateRaw = rawFor("gct_rate_pct");
+  const gctRateNum = typeof gctRateRaw === "string" ? Number(gctRateRaw) : gctRateRaw;
+
+  return {
+    gct_enabled: typeof gctEnabledRaw === "boolean" ? gctEnabledRaw : false,
+    gct_rate_pct: typeof gctRateNum === "number" && Number.isFinite(gctRateNum) ? gctRateNum : 15,
+  };
+}
+
+export type GenerateStandaloneInvoiceResult =
+  | { ok: true; invoice: InvoiceRow }
+  | { ok: false; error: string };
+
+/**
+ * Creates a standalone invoice: computes + validates its line items (pure,
+ * lib/invoices/lineItems.ts), applies GCT the same way every other invoice
+ * does (lib/invoices/amounts.ts's `computeStandaloneInvoiceAmounts`, which
+ * reuses the SAME `gctForSubtotal` helper the deposit/balance generators
+ * use — no second GCT calculation anywhere in this codebase), allocates a
+ * number from the SAME race-safe `next_invoice_number` sequence
+ * quote-derived invoices use (so a standalone invoice's number can never
+ * collide with one generated from a quote), then inserts the invoice row and
+ * its line items.
+ *
+ * The invoice row and its line items are two separate inserts (no
+ * multi-statement transaction available through supabase-js here) — if the
+ * line-item insert fails after the invoice insert succeeds, the just-created
+ * invoice row is deleted so the caller never ends up with an orphaned
+ * invoice that has amounts but no visible lines. The allocated invoice
+ * number is not reused in that case (matching this codebase's existing
+ * tolerance for numbering gaps on a failed/retried create — see
+ * lib/invoices/numbering.ts's header: numbers are handed out, never taken
+ * back).
+ */
+export async function generateStandaloneInvoice(
+  supabase: Client,
+  input: StandaloneInvoiceInput,
+  createdBy: string | null,
+): Promise<GenerateStandaloneInvoiceResult> {
+  if (!input.companyId) return { ok: false, error: "Choose a company." };
+
+  const { lines, subtotalJmd } = computeLineItemTotals(input.lines);
+  if (lines.length === 0) {
+    return { ok: false, error: "Add at least one line item with a description, quantity, and unit price." };
+  }
+
+  const gctSnapshot = await loadLiveGctSnapshot(supabase);
+  const amounts = computeStandaloneInvoiceAmounts(subtotalJmd, gctSnapshot);
+
+  const numberResult = await nextInvoiceNumber(supabase);
+  if ("error" in numberResult) return { ok: false, error: numberResult.error };
+
+  const { data, error } = await supabase
+    .from("invoices")
+    .insert({
+      invoice_number: numberResult.number,
+      quote_id: null,
+      project_id: input.projectId,
+      company_id: input.companyId,
+      invoice_type: "standalone",
+      status: "draft",
+      subtotal_jmd: amounts.subtotalJmd,
+      gct_amount_jmd: amounts.gctAmountJmd,
+      amount_jmd: amounts.amountJmd,
+      amount_usd: null,
+      fx_note: null,
+      due_note: input.dueNote,
+      created_by: createdBy,
+    })
+    .select("*")
+    .single();
+
+  if (error) {
+    return { ok: false, error: `Could not create the invoice: ${error.message}` };
+  }
+
+  const invoice = data as InvoiceRow;
+
+  const { error: lineItemsError } = await supabase.from("invoice_line_items").insert(
+    lines.map((l): Omit<InvoiceLineItemRow, "id" | "created_at" | "updated_at"> => ({
+      invoice_id: invoice.id,
+      description: l.description,
+      qty: l.qty,
+      unit_price_jmd: l.unitPriceJmd,
+      line_total_jmd: l.lineTotalJmd,
+      sort_order: l.sortOrder,
+    })),
+  );
+
+  if (lineItemsError) {
+    // Best-effort cleanup — see this function's header. Deleting is safe:
+    // no payment can exist yet against an invoice that was never returned
+    // to a caller.
+    await supabase.from("invoices").delete().eq("id", invoice.id);
+    return { ok: false, error: `Could not save the invoice's line items: ${lineItemsError.message}` };
+  }
+
+  return { ok: true, invoice };
 }

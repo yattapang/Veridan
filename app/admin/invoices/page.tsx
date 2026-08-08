@@ -52,12 +52,23 @@ export default async function InvoicesPage() {
 
   return (
     <div className="max-w-5xl">
-      <h1 className="text-2xl font-semibold text-veridan-ink">Invoices</h1>
-      <p className="mt-2 text-sm text-veridan-warm-gray">
-        Deposit invoices are created automatically when a quote is accepted; balance invoices are
-        created when a quote is marked customs cleared. Both are always JMD at the source quote&apos;s
-        locked FX rate.
-      </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-veridan-ink">Invoices</h1>
+          <p className="mt-2 max-w-2xl text-sm text-veridan-warm-gray">
+            Deposit invoices are created automatically when a quote is accepted; balance invoices
+            are created when a quote is marked customs cleared. Both are always JMD at the source
+            quote&apos;s locked FX rate. Use &ldquo;New invoice&rdquo; to build a standalone invoice
+            from scratch, with no source quote.
+          </p>
+        </div>
+        <Link
+          href="/admin/invoices/new"
+          className="rounded-md bg-veridan-ink px-4 py-2 text-xs font-medium uppercase tracking-wide text-veridan-paper transition-opacity duration-150 hover:opacity-90"
+        >
+          New invoice
+        </Link>
+      </div>
 
       <section className="mt-8">
         {invoices.length === 0 ? (

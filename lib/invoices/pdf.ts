@@ -20,6 +20,7 @@ import { buildDepositContextLine } from "@/lib/invoice-pdf/format";
 import { InvoicePdf } from "@/lib/invoice-pdf/InvoicePdf";
 import { loadInvoiceItemization } from "@/lib/invoices/itemization";
 import { loadPaymentInstructions } from "@/lib/invoices/paymentInstructions";
+import { loadStandaloneInvoiceItemization } from "@/lib/invoices/standaloneItemization";
 import { siteMeta, contactInfo } from "@/lib/site-content";
 import type { FxSnapshotStored, InvoiceRow, ParametersSnapshotStored } from "@/lib/supabase/types";
 
@@ -80,7 +81,9 @@ export async function renderInvoicePdf(supabase: Client, invoiceId: string): Pro
   const [itemization, paymentInstructions] = await Promise.all([
     invoice.quotes
       ? loadInvoiceItemization(supabase, invoice.quotes, invoice.invoice_type)
-      : Promise.resolve(null),
+      : invoice.invoice_type === "standalone"
+        ? loadStandaloneInvoiceItemization(supabase, invoice.id)
+        : Promise.resolve(null),
     // Admin-editable parameter, read live at render time (never snapshotted —
     // bank details are banking facts, not priced terms).
     loadPaymentInstructions(supabase),
