@@ -307,3 +307,13 @@ create policy expenses_founder_all on public.expenses
 drop policy if exists actual_costs_founder_all on public.actual_costs;
 create policy actual_costs_founder_all on public.actual_costs
   for all to authenticated using (public.is_founder()) with check (public.is_founder());
+
+-- extracted_prices is every row scanned out of a supplier price list: a unit
+-- cost per line. The founder's brief allows staff into Price Files, but the
+-- no-supplier-costs rule outranks an area allowance, so the split is: staff see
+-- the UPLOADS list (file name, supplier, status — price_file_uploads, left
+-- open), founders see the extracted COSTS and the review screen that edits them
+-- (/admin/price-files/[id]/review is gated whole by its layout).
+drop policy if exists extracted_prices_founder_all on public.extracted_prices;
+create policy extracted_prices_founder_all on public.extracted_prices
+  for all to authenticated using (public.is_founder()) with check (public.is_founder());

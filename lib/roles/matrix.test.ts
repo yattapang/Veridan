@@ -176,6 +176,7 @@ describe("isCostDetailRoute", () => {
   it("matches the cost-only sub-views", () => {
     expect(isCostDetailRoute("/admin/products/compare/group-1")).toBe(true);
     expect(isCostDetailRoute("/admin/projects/p1/hardware-sets/s1")).toBe(true);
+    expect(isCostDetailRoute("/admin/price-files/f1")).toBe(true);
     expect(isCostDetailRoute("/admin/price-files/f1/review")).toBe(true);
   });
 
@@ -183,7 +184,7 @@ describe("isCostDetailRoute", () => {
     expect(isCostDetailRoute("/admin/products")).toBe(false);
     expect(isCostDetailRoute("/admin/projects/p1")).toBe(false);
     expect(isCostDetailRoute("/admin/projects/p1/doors")).toBe(false);
-    expect(isCostDetailRoute("/admin/price-files/f1")).toBe(false);
+    expect(isCostDetailRoute("/admin/price-files")).toBe(false);
   });
 });
 
@@ -194,6 +195,7 @@ describe("canAccessAdminPath", () => {
     expect(canAccessAdminPath("staff", "/admin/projects/p1")).toBe(true);
     expect(canAccessAdminPath("staff", "/admin/projects/p1/hardware-sets/s1")).toBe(false);
     expect(canAccessAdminPath("staff", "/admin/price-files")).toBe(true);
+    expect(canAccessAdminPath("staff", "/admin/price-files/f1")).toBe(false);
     expect(canAccessAdminPath("staff", "/admin/price-files/f1/review")).toBe(false);
   });
 

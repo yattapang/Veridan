@@ -56,8 +56,13 @@ describe("resolveSessionUser", () => {
   });
 
   it("treats a row with no active column (pre-migration) as active", () => {
-    const { active: _active, ...noActive } = ROW;
-    const user = resolveSessionUser(AUTH, noActive as RawUserRow);
+    const noActive: RawUserRow = {
+      id: ROW.id,
+      email: ROW.email,
+      display_name: ROW.display_name,
+      role: ROW.role,
+    };
+    const user = resolveSessionUser(AUTH, noActive);
     expect(user?.active).toBe(true);
     expect(isFounder(user)).toBe(true);
   });

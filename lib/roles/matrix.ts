@@ -177,8 +177,9 @@ export const COST_DETAIL_ROUTES = [
   "/admin/products/compare",
   // Per-door hardware-set line items: product unit costs + cost overrides.
   "/admin/projects/:id/hardware-sets",
-  // The extracted supplier price-list review table (unit cost per row).
-  "/admin/price-files/:id/review",
+  // A price file past the list view: extraction counts, the review table of
+  // unit costs, and seeding a quote from them.
+  "/admin/price-files/:id",
 ] as const;
 
 /**
