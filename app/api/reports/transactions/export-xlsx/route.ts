@@ -16,12 +16,19 @@ import { loadFinancialStatementData } from "@/lib/reports/load";
 import { buildTransactionLedger, parseTransactionTypes } from "@/lib/reports/transactions";
 import { buildTransactionLedgerWorkbook } from "@/lib/reports/xlsx";
 import { NextResponse } from "next/server";
+import { requireFounderRoute } from "@/lib/roles/guards";
 
 export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   const user = await getCurrentUser();
   if (!user) return NOT_AUTHENTICATED;
+
+  // Founder-only, re-derived here and not inherited from any page guard: an
+  // export route is a plain GET URL that a signed-in staff session could hit
+  // directly. 403 with no body rather than a redirect a fetch would follow.
+  const founderGate = await requireFounderRoute();
+  if (!founderGate.ok) return founderGate.response;
 
   let supabase;
   try {

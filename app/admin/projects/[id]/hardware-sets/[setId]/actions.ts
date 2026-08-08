@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
 import { CURRENCY_CODES, type CurrencyCode } from "@/lib/supabase/types";
+import { requireFounderAction } from "@/lib/roles/guards";
 
 export type LineItemActionResult =
   | { ok: true; error?: undefined }
@@ -82,6 +83,9 @@ export async function addLineItem(
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to add a line item." };
 
+  const founderGate = await requireFounderAction("add a hardware-set line item");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
+
   const productId = String(formData.get("product_id") ?? "").trim();
   if (!productId) {
     return { ok: false, error: "Choose a product to add." };
@@ -128,6 +132,9 @@ export async function updateLineItem(
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to update a line item." };
 
+  const founderGate = await requireFounderAction("update a hardware-set line item");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
+
   const parsed = parseLineFields(formData);
   if (!parsed.ok) return parsed;
 
@@ -161,6 +168,9 @@ export async function deleteLineItem(
 
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to remove a line item." };
+
+  const founderGate = await requireFounderAction("remove a hardware-set line item");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
 
   const { error } = await supabase.from("hardware_set_line_items").delete().eq("id", lineId);
   if (error) {

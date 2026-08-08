@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
 import { CURRENCY_CODES, type CurrencyCode } from "@/lib/supabase/types";
+import { requireFounderAction } from "@/lib/roles/guards";
 
 export type SupplierFormResult =
   | { ok: true; error?: undefined }
@@ -62,6 +63,9 @@ export async function createSupplier(
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to create a supplier." };
 
+  const founderGate = await requireFounderAction("create a supplier");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
+
   const parsed = parseSupplierFields(formData);
   if (!parsed.ok) return parsed;
 
@@ -88,6 +92,9 @@ export async function updateSupplier(
 
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to update a supplier." };
+
+  const founderGate = await requireFounderAction("update a supplier");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
 
   const parsed = parseSupplierFields(formData);
   if (!parsed.ok) return parsed;
@@ -117,6 +124,9 @@ export async function setSupplierActive(id: string, active: boolean): Promise<Su
 
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to update a supplier." };
+
+  const founderGate = await requireFounderAction("update a supplier");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
 
   const { error } = await supabase.from("suppliers").update({ active }).eq("id", id);
   if (error) {

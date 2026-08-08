@@ -23,6 +23,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
 import { generateStandaloneInvoice } from "@/lib/invoices/generate";
+import { requireFounderAction } from "@/lib/roles/guards";
 
 export type CreateStandaloneInvoiceLineInput = {
   description: string;
@@ -49,6 +50,9 @@ export async function createStandaloneInvoice(
 
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to create an invoice." };
+
+  const founderGate = await requireFounderAction("create an invoice");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
 
   const trimmedCompanyId = companyId.trim();
   if (!trimmedCompanyId) return { ok: false, error: "Choose a company." };

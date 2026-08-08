@@ -20,6 +20,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
+import { requireFounderAction } from "@/lib/roles/guards";
 import {
   describeCategoryDeletion,
   swapSortOrder,
@@ -68,6 +69,9 @@ async function createExpenseCategoryCore(
 
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to create a category." };
+
+  const founderGate = await requireFounderAction("create an expense category");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
 
   const existing = await fetchExistingCategories(supabase);
   const validated = validateNewExpenseCategory(label, existing);
@@ -141,6 +145,9 @@ export async function renameExpenseCategory(
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to rename a category." };
 
+  const founderGate = await requireFounderAction("rename an expense category");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
+
   const label = String(formData.get("label") ?? "");
   const description = String(formData.get("description") ?? "").trim();
 
@@ -176,6 +183,9 @@ export async function deleteExpenseCategory(id: string): Promise<ExpenseCategory
 
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to delete a category." };
+
+  const founderGate = await requireFounderAction("delete an expense category");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
 
   const { data: categoryRow, error: categoryError } = await supabase
     .from("expense_categories")
@@ -214,6 +224,9 @@ export async function reorderExpenseCategory(
 
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to reorder categories." };
+
+  const founderGate = await requireFounderAction("reorder expense categories");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
 
   const { data, error: loadError } = await supabase
     .from("expense_categories")

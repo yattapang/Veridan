@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
 import { CURRENCY_CODES, type CurrencyCode } from "@/lib/supabase/types";
+import { requireFounderAction } from "@/lib/roles/guards";
 
 export type ProductFormResult =
   | { ok: true; error?: undefined }
@@ -140,6 +141,9 @@ export async function createProduct(
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to create a product." };
 
+  const founderGate = await requireFounderAction("create a product");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
+
   const parsed = parseProductFields(formData);
   if (!parsed.ok) return parsed;
 
@@ -166,6 +170,9 @@ export async function updateProduct(
 
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to update a product." };
+
+  const founderGate = await requireFounderAction("change a product");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
 
   const parsed = parseProductFields(formData);
   if (!parsed.ok) return parsed;
@@ -194,6 +201,9 @@ export async function setProductActive(id: string, active: boolean): Promise<Pro
 
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to update a product." };
+
+  const founderGate = await requireFounderAction("change a product");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
 
   const { error } = await supabase.from("products").update({ active }).eq("id", id);
   if (error) {

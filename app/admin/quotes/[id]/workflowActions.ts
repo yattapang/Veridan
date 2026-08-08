@@ -22,6 +22,7 @@ import { canEdit, canTransition, nextRevisionNumber, revisionQuoteRef } from "@/
 import { generateBalanceInvoiceForQuote, generateDepositInvoiceForQuote } from "@/lib/invoices/generate";
 import { isBeforeCustomsCleared } from "@/lib/orders/workflow";
 import type { BusinessParameterRow, OrderRow, QuoteOriginRow, QuoteRow, QuoteStatus } from "@/lib/supabase/types";
+import { requireFounderAction } from "@/lib/roles/guards";
 
 export type WorkflowActionResult = { ok: true; error?: undefined } | { ok: false; error: string };
 
@@ -97,6 +98,9 @@ export async function approveQuote(quoteId: string): Promise<WorkflowActionResul
 
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to approve a quote." };
+
+  const founderGate = await requireFounderAction("approve a quote's pricing");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
 
   const loaded = await loadQuoteForWorkflow(supabase, quoteId);
   if ("error" in loaded) return { ok: false, error: loaded.error };
@@ -211,7 +215,15 @@ export async function sendQuote(
  * an already-successful accept — it must never look like (or actually be) a
  * rollback of the accept itself.
  */
+/**
+ * Founder-only: accepting a quote immediately raises the deposit INVOICE, and
+ * invoicing is a founder-only area. Gated BEFORE the status transition so a
+ * staff session cannot half-apply it (quote accepted, invoice refused).
+ */
 export async function acceptQuote(quoteId: string): Promise<WorkflowActionResult> {
+  const founderGate = await requireFounderAction("accept a quote (it raises the deposit invoice)");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
+
   const transition = await applySimpleTransition(quoteId, "accepted", { accepted_at: new Date().toISOString() });
   if (!transition.ok) return transition;
 
@@ -287,6 +299,9 @@ export async function markCustomsCleared(quoteId: string): Promise<WorkflowActio
 
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to mark customs cleared." };
+
+  const founderGate = await requireFounderAction("mark customs cleared (it raises the balance invoice)");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
 
   const loaded = await loadQuoteForWorkflow(supabase, quoteId);
   if ("error" in loaded) return { ok: false, error: loaded.error };

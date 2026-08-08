@@ -23,6 +23,7 @@ import {
   sumPayments,
 } from "@/lib/invoices/paymentStatus";
 import type { InvoicePaymentRow, InvoiceRow } from "@/lib/supabase/types";
+import { requireFounderAction } from "@/lib/roles/guards";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -53,6 +54,9 @@ export async function issueInvoice(invoiceId: string): Promise<InvoiceActionResu
 
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to issue an invoice." };
+
+  const founderGate = await requireFounderAction("issue an invoice");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
 
   const { data, error } = await supabase
     .from("invoices")
@@ -91,6 +95,9 @@ export async function voidInvoice(invoiceId: string): Promise<InvoiceActionResul
 
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to void an invoice." };
+
+  const founderGate = await requireFounderAction("void an invoice");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
 
   const { data: existingPayments, error: paymentsCheckError } = await supabase
     .from("invoice_payments")
@@ -153,6 +160,9 @@ export async function recordPayment(
 
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to record a payment." };
+
+  const founderGate = await requireFounderAction("record a payment");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
 
   const { data: invoiceData, error: invoiceError } = await supabase
     .from("invoices")
@@ -266,6 +276,9 @@ export async function sendInvoice(
 
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to send an invoice." };
+
+  const founderGate = await requireFounderAction("send an invoice");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
 
   const { data: invoiceData, error: invoiceError } = await supabase
     .from("invoices")
@@ -400,6 +413,9 @@ export async function regenerateInvoice(invoiceId: string): Promise<RegenerateIn
 
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to regenerate an invoice." };
+
+  const founderGate = await requireFounderAction("regenerate an invoice");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
 
   const { data: invoiceData, error: invoiceError } = await supabase
     .from("invoices")

@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { syncUserRecord } from "@/lib/auth";
 
@@ -30,7 +31,15 @@ function LoginForm() {
       }
       // Sync the public.users row (Task 5: "users table sync on first
       // login"). Non-fatal if it fails — don't block sign-in over it.
-      const { error: syncError } = await syncUserRecord();
+      const { error: syncError, deactivated } = await syncUserRecord();
+      if (deactivated) {
+        // A locked-out or removed account. The admin shell would refuse them
+        // anyway (getCurrentUser returns null for an inactive user), so end the
+        // session here and say why instead of bouncing them to a blank login.
+        await supabase.auth.signOut();
+        setError(syncError ?? "This account no longer has access.");
+        return;
+      }
       if (syncError) {
         console.error("[veridan:login] User record sync failed:", syncError);
       }
@@ -117,6 +126,11 @@ function LoginForm() {
             {loading ? "Signing in…" : "Sign in"}
           </button>
         </form>
+        <p className="mt-4 text-center text-sm text-gray-500">
+          <Link href="/forgot-password" className="underline underline-offset-2">
+            Forgot password?
+          </Link>
+        </p>
       </div>
     </main>
   );

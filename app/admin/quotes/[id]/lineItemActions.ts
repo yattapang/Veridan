@@ -7,6 +7,7 @@ import { toUsd } from "@/lib/landed-cost/engine";
 import { fxSnapshotToEngine } from "@/lib/quotes/snapshot";
 import { ensureOriginForSupplier, recomputeQuote, regroupLineItemOrigins } from "@/lib/quotes/persist";
 import { CURRENCY_CODES, type CurrencyCode, type ParametersSnapshotStored, type QuoteRow } from "@/lib/supabase/types";
+import { requireFounderAction } from "@/lib/roles/guards";
 
 /**
  * Line add/edit/remove for line_item-mode quotes (Task 17 — retrofit/simple
@@ -68,6 +69,9 @@ export async function addLibraryQuoteLine(
 
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to add a quote line." };
+
+  const founderGate = await requireFounderAction("add a quote line");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
 
   const loaded = await loadDraftLineItemQuote(supabase, quoteId);
   if ("error" in loaded) return { ok: false, error: loaded.error };
@@ -166,6 +170,9 @@ export async function addAdHocQuoteLine(
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to add a quote line." };
 
+  const founderGate = await requireFounderAction("add a quote line");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
+
   const loaded = await loadDraftLineItemQuote(supabase, quoteId);
   if ("error" in loaded) return { ok: false, error: loaded.error };
   const { quote } = loaded;
@@ -257,6 +264,9 @@ export async function updateQuoteLine(
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to update a quote line." };
 
+  const founderGate = await requireFounderAction("update a quote line");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
+
   const loaded = await loadDraftLineItemQuote(supabase, quoteId);
   if ("error" in loaded) return { ok: false, error: loaded.error };
   const { quote } = loaded;
@@ -333,6 +343,9 @@ export async function deleteQuoteLine(quoteId: string, lineId: string): Promise<
 
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to remove a quote line." };
+
+  const founderGate = await requireFounderAction("remove a quote line");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
 
   const loaded = await loadDraftLineItemQuote(supabase, quoteId);
   if ("error" in loaded) return { ok: false, error: loaded.error };

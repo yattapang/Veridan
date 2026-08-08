@@ -19,6 +19,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
 import { parseExpenseInput, type ExpenseInputRaw } from "@/lib/expenses/expense";
 import { jamaicaToday } from "@/lib/reports/period";
+import { requireFounderAction } from "@/lib/roles/guards";
 
 export type ExpenseActionResult = { ok: true; error?: undefined } | { ok: false; error: string };
 
@@ -63,6 +64,9 @@ export async function createExpense(
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to record an expense." };
 
+  const founderGate = await requireFounderAction("record an expense");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
+
   const parsed = parseExpenseInput(readExpenseForm(formData), jamaicaToday());
   if (!parsed.ok) return parsed;
 
@@ -87,6 +91,9 @@ export async function updateExpense(
 
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to edit an expense." };
+
+  const founderGate = await requireFounderAction("edit an expense");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
 
   const parsed = parseExpenseInput(readExpenseForm(formData), jamaicaToday());
   if (!parsed.ok) return parsed;
@@ -116,6 +123,9 @@ export async function deleteExpense(expenseId: string): Promise<ExpenseActionRes
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to delete an expense." };
 
+  const founderGate = await requireFounderAction("delete an expense");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
+
   const { error } = await supabase.from("expenses").delete().eq("id", expenseId);
   if (error) return { ok: false, error: `Could not delete the expense: ${error.message}` };
 
@@ -142,6 +152,9 @@ export async function setExpensePaidDate(
 
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to change an expense's payment date." };
+
+  const founderGate = await requireFounderAction("change an expense's payment date");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
 
   if (paidDate != null && !/^\d{4}-\d{2}-\d{2}$/.test(paidDate)) {
     return { ok: false, error: "Date paid must be a valid date." };

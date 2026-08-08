@@ -13,6 +13,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
+import { requireFounderRoute } from "@/lib/roles/guards";
 import { renderInvoicePdf } from "@/lib/invoices/pdf";
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -22,6 +23,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   if (!user) {
     return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
   }
+
+  // Invoicing is a founder-only area, and this URL bypasses its page guard
+  // entirely, so the role is re-derived here rather than assumed.
+  const founderGate = await requireFounderRoute();
+  if (!founderGate.ok) return founderGate.response;
 
   let supabase;
   try {

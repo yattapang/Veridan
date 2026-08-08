@@ -14,6 +14,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
+import { requireFounderRoute } from "@/lib/roles/guards";
 import { runExtraction } from "@/lib/price-extraction/extract";
 
 /**
@@ -31,6 +32,11 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   if (!user) {
     return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
   }
+
+  // Extraction reads a supplier price list into unit costs. Founder-only, and
+  // re-derived here because the review page's guard does not cover this URL.
+  const founderGate = await requireFounderRoute();
+  if (!founderGate.ok) return founderGate.response;
 
   let supabase;
   try {

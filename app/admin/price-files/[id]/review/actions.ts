@@ -29,6 +29,7 @@ import { createLineItemQuoteRecord } from "@/app/admin/projects/[id]/actions";
 import { ensureOriginForSupplier, recomputeQuote, regroupLineItemOrigins } from "@/lib/quotes/persist";
 import { fxSnapshotToEngine } from "@/lib/quotes/snapshot";
 import { toUsd } from "@/lib/landed-cost/engine";
+import { requireFounderAction } from "@/lib/roles/guards";
 
 /**
  * Phase 2B Tasks 39-41 — review-screen server actions (Plan §2.2 Stage 3-4b).
@@ -127,6 +128,9 @@ export async function setUploadSupplier(
   }
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in." };
+
+  const founderGate = await requireFounderAction("review a supplier price file");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
 
   const supplierId = String(formData.get("supplier_id") ?? "").trim();
   if (!supplierId) return { ok: false, error: "Choose a supplier." };
@@ -288,6 +292,9 @@ export async function acceptExtractedRow(
   }
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to accept a row." };
+
+  const founderGate = await requireFounderAction("accept an extracted price");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
 
   const loadedUpload = await loadUpload(supabase, uploadId);
   if ("error" in loadedUpload) return { ok: false, error: loadedUpload.error };
@@ -451,6 +458,9 @@ export async function rejectExtractedRow(uploadId: string, rowId: string): Promi
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to reject a row." };
 
+  const founderGate = await requireFounderAction("reject an extracted price");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
+
   // Review finding MAJOR-2: refuse when already resolved — rejecting a row
   // AFTER it was accepted would flip the audit trail to "rejected" while the
   // library/history writes it triggered remain in place.
@@ -500,6 +510,9 @@ export async function acceptAllConfident(uploadId: string): Promise<ReviewAction
   }
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in." };
+
+  const founderGate = await requireFounderAction("review a supplier price file");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
 
   const loadedUpload = await loadUpload(supabase, uploadId);
   if ("error" in loadedUpload) return { ok: false, error: loadedUpload.error };
@@ -618,6 +631,9 @@ export async function seedQuoteFromReview(
   }
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to seed a quote." };
+
+  const founderGate = await requireFounderAction("seed a quote from a price file");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
 
   const loadedUpload = await loadUpload(supabase, uploadId);
   if ("error" in loadedUpload) return { ok: false, error: loadedUpload.error };

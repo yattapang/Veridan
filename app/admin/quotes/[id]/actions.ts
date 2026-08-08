@@ -11,6 +11,7 @@ import { buildFxSnapshot } from "@/lib/quotes/snapshot";
 import { computeQuoteResult } from "@/lib/quotes/mapping";
 import { loadQuoteState, persistComputed, recomputeQuote } from "@/lib/quotes/persist";
 import type { MarginFlag } from "@/lib/landed-cost/types";
+import { requireFounderAction } from "@/lib/roles/guards";
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -90,6 +91,9 @@ export async function updateQuoteOrigin(
   const originUser = await getCurrentUser();
   if (!originUser) return { ok: false, error: "You must be signed in to edit a shipment origin." };
 
+  const founderGate = await requireFounderAction("edit a shipment origin's costs");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
+
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
     .select("id, status")
@@ -168,6 +172,9 @@ export async function updateQuoteMargin(
 
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to change pricing." };
+
+  const founderGate = await requireFounderAction("change a quote's margin or pricing");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
 
   const marginRaw = String(formData.get("margin_pct") ?? "").trim();
   const marginPct = Number(marginRaw);
@@ -274,6 +281,9 @@ export async function refreshFxSnapshot(quoteId: string): Promise<FxActionResult
 
   const fxUser = await getCurrentUser();
   if (!fxUser) return { ok: false, error: "You must be signed in to refresh the FX snapshot." };
+
+  const founderGate = await requireFounderAction("refresh a quote's FX snapshot");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
 
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")

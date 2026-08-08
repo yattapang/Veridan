@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
+import { requireFounderAction } from "@/lib/roles/guards";
 import type {
   BusinessParameterRow,
   ParameterValueType,
@@ -148,6 +149,9 @@ export async function updateParameter(
   if (!user) {
     return { ok: false, error: "You must be signed in to change parameters." };
   }
+
+  const founderGate = await requireFounderAction("change a business parameter");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
 
   const { data: existing, error: fetchError } = await supabase
     .from("business_parameters")

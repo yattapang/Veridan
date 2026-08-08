@@ -15,6 +15,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { canTransitionOrder, isOrderClosed } from "@/lib/orders/workflow";
 import { ACTUAL_COST_CATEGORIES } from "@/lib/supabase/types";
 import type { ActualCostCategory, OrderRow, OrderStatus } from "@/lib/supabase/types";
+import { requireFounderAction } from "@/lib/roles/guards";
 
 export type OrderActionResult = { ok: true; error?: undefined } | { ok: false; error: string };
 
@@ -144,6 +145,9 @@ export async function addActualCost(
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to record an actual cost." };
 
+  const founderGate = await requireFounderAction("record an actual cost");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
+
   const loaded = await loadOrder(supabase, orderId);
   if ("error" in loaded) return { ok: false, error: loaded.error };
   if (isOrderClosed(loaded.order.status)) {
@@ -180,6 +184,9 @@ export async function updateActualCost(
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to edit an actual cost." };
 
+  const founderGate = await requireFounderAction("edit an actual cost");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
+
   const loaded = await loadOrder(supabase, orderId);
   if ("error" in loaded) return { ok: false, error: loaded.error };
   if (isOrderClosed(loaded.order.status)) {
@@ -213,6 +220,9 @@ export async function deleteActualCost(orderId: string, costId: string): Promise
 
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "You must be signed in to remove an actual cost." };
+
+  const founderGate = await requireFounderAction("remove an actual cost");
+  if (!founderGate.ok) return { ok: false, error: founderGate.error };
 
   const loaded = await loadOrder(supabase, orderId);
   if ("error" in loaded) return { ok: false, error: loaded.error };
