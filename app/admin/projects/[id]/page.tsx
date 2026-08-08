@@ -11,6 +11,7 @@ import type {
 } from "@/lib/supabase/types";
 import { InstructiveMessage } from "@/components/admin/InstructiveMessage";
 import { nextSetCode, summarizeSetUsd, type SupplierFxRates } from "@/lib/hardware-sets";
+import { requireAdminArea } from "@/lib/roles/guards";
 import { ProjectHeaderForm } from "./ProjectHeaderForm";
 import { AddHardwareSetForm } from "./AddHardwareSetForm";
 import { CloneSetForm, type CloneableSetOption } from "./CloneSetForm";
@@ -44,6 +45,10 @@ export default async function ProjectDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  // Staff run projects; the quote LANDED total and the hardware-set supplier
+  // subtotals are cost figures and are withheld from them.
+  const { showCosts } = await requireAdminArea("projects");
+
   const { id } = await params;
 
   let supabase;
@@ -272,7 +277,8 @@ export default async function ProjectDetailPage({
                   )}
                 </div>
                 <div className="text-xs text-veridan-warm-gray">
-                  Landed {formatUsd(quote.total_landed_usd)} · Client {formatJmd(quote.total_client_jmd)}
+                  {showCosts ? `Landed ${formatUsd(quote.total_landed_usd)} · ` : ""}Client{" "}
+                  {formatJmd(quote.total_client_jmd)}
                 </div>
               </li>
             ))}
@@ -313,6 +319,7 @@ export default async function ProjectDetailPage({
                 projectId={project.id}
                 set={set}
                 summary={summarizeSetUsd(lineItemsBySet.get(set.id) ?? [], fxRates)}
+                showCosts={showCosts}
               />
             ))}
           </ul>

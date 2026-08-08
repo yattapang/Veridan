@@ -7,6 +7,7 @@ import { fetchDashboardKpis, fetchPipelineRows } from "@/lib/pipeline-data";
 import { groupByStage, PIPELINE_STAGES, type PipelineStage } from "@/lib/pipeline";
 import type { PipelineViewRow } from "@/lib/supabase/types";
 import { formatJmd } from "@/lib/quotes/format";
+import { requireAdminArea } from "@/lib/roles/guards";
 
 export const metadata = {
   title: "Pipeline",
@@ -62,6 +63,10 @@ export default async function PipelinePage({
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
+  // Open to both roles; the money KPI tile and the margin-breach banner are
+  // stripped for staff, same as the dashboard.
+  const { showCosts } = await requireAdminArea("pipeline");
+
   const params = await searchParams;
   const expandedStage = firstParam(params.expand);
 
@@ -108,8 +113,8 @@ export default async function PipelinePage({
       </p>
 
       <div className="mt-6">
-        <EarlyWarningBanners kpis={kpis} />
-        <KpiTiles kpis={kpis} />
+        <EarlyWarningBanners kpis={kpis} showMargins={showCosts} />
+        <KpiTiles kpis={kpis} showValues={showCosts} />
       </div>
 
       <section className="mt-8">

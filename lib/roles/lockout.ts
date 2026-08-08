@@ -192,10 +192,22 @@ export function checkDelete(
     );
   }
 
-  if (target.role === "founder" && countActiveFounders(users) <= 1) {
-    return deny(
-      `${target.email} is the last active founder and cannot be deleted. Promote another founder first.`
-    );
+  if (target.role === "founder") {
+    if (target.active && countActiveFounders(users) <= 1) {
+      return deny(
+        `${target.email} is the last active founder and cannot be deleted. Promote another founder first.`
+      );
+    }
+    // Also refuse to delete the only remaining founder RECORD, active or not —
+    // a locked-out sole founder is still the way back in once restored.
+    const otherFounders = users.filter(
+      (u) => u.id !== targetId && u.role === "founder" && !isRemoved(u)
+    ).length;
+    if (otherFounders === 0) {
+      return deny(
+        `${target.email} is the only founder account left and cannot be deleted. Promote someone else to Founder first.`
+      );
+    }
   }
 
   if (target.active) {

@@ -5,6 +5,7 @@ import { KpiTiles } from "@/components/admin/KpiTiles";
 import { EarlyWarningBanners } from "@/components/admin/EarlyWarningBanners";
 import { fetchDashboardKpis, fetchPipelineRows, fetchRecentActivity } from "@/lib/pipeline-data";
 import { groupByStage, PIPELINE_STAGES } from "@/lib/pipeline";
+import { requireAdminArea } from "@/lib/roles/guards";
 
 export const metadata = {
   title: "Dashboard",
@@ -34,6 +35,10 @@ function formatDateTime(iso: string): string {
  * links. Replaces the Task 5 placeholder.
  */
 export default async function AdminDashboardPage() {
+  // Open to both roles, but the money tiles, the margin-breach banner and the
+  // founder-only quick links are stripped for staff.
+  const { showCosts, founder } = await requireAdminArea("dashboard");
+
   let supabase;
   try {
     supabase = await createClient();
@@ -78,8 +83,8 @@ export default async function AdminDashboardPage() {
           <InstructiveMessage title="KPI tiles unavailable" body={`Could not compute KPIs (${kpis.error}).`} />
         ) : (
           <>
-            <EarlyWarningBanners kpis={kpis} />
-            <KpiTiles kpis={kpis} />
+            <EarlyWarningBanners kpis={kpis} showMargins={showCosts} />
+            <KpiTiles kpis={kpis} showValues={showCosts} />
           </>
         )}
       </div>
@@ -174,22 +179,28 @@ export default async function AdminDashboardPage() {
                 Enquiries &mdash; review and convert
               </Link>
             </li>
-            <li>
-              <Link
-                href="/admin/parameters"
-                className="block rounded-md border border-veridan-warm-gray-light bg-white px-3 py-2 text-sm text-veridan-ink hover:border-veridan-accent"
-              >
-                Parameters &mdash; rates, tiers, defaults
-              </Link>
-            </li>
-            <li>
-              <Link
-                href="/admin/overrides"
-                className="block rounded-md border border-veridan-warm-gray-light bg-white px-3 py-2 text-sm text-veridan-ink hover:border-veridan-accent"
-              >
-                Overrides &mdash; margin/floor override log
-              </Link>
-            </li>
+            {/* Founder-only destinations — a staff member would only be
+                bounced to /admin/forbidden, so they are not offered. */}
+            {founder && (
+              <>
+                <li>
+                  <Link
+                    href="/admin/parameters"
+                    className="block rounded-md border border-veridan-warm-gray-light bg-white px-3 py-2 text-sm text-veridan-ink hover:border-veridan-accent"
+                  >
+                    Parameters &mdash; rates, tiers, defaults
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    href="/admin/overrides"
+                    className="block rounded-md border border-veridan-warm-gray-light bg-white px-3 py-2 text-sm text-veridan-ink hover:border-veridan-accent"
+                  >
+                    Overrides &mdash; margin/floor override log
+                  </Link>
+                </li>
+              </>
+            )}
           </ul>
         </div>
       </section>

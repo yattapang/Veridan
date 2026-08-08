@@ -13,6 +13,7 @@ import { InstructiveMessage } from "@/components/admin/InstructiveMessage";
 import { signPriceFileUrl, fileNameFromPath } from "@/lib/storage";
 import { ProductForm } from "./ProductForm";
 import { ProductListItem, type ProductPriceProvenance } from "./ProductListItem";
+import { requireAdminArea } from "@/lib/roles/guards";
 
 export const metadata = {
   title: "Products",
@@ -29,6 +30,11 @@ export default async function ProductsPage({
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
+  // Staff may browse the Hardware Library — descriptions, manufacturers,
+  // catalogue refs, finishes — but never unit costs, and never the create/edit
+  // forms, which are cost entry. The matching actions re-check the role.
+  const { showCosts } = await requireAdminArea("products");
+
   const params = await searchParams;
   const { q, category, manufacturer, supplierId, itemGroupId, grade, finishCode } =
     parseProductFilterParams(params);
@@ -231,17 +237,19 @@ export default async function ProductsPage({
         </div>
       )}
 
-      <section className="mt-8 rounded-md border border-veridan-warm-gray-light bg-white px-5 py-5">
-        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">
-          Add a product
-        </h2>
-        <ProductForm
-          suppliers={suppliers}
-          itemGroups={itemGroups}
-          productCategories={productCategories}
-          distinctFinishes={distinctFinishes}
-        />
-      </section>
+      {showCosts && (
+        <section className="mt-8 rounded-md border border-veridan-warm-gray-light bg-white px-5 py-5">
+          <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">
+            Add a product
+          </h2>
+          <ProductForm
+            suppliers={suppliers}
+            itemGroups={itemGroups}
+            productCategories={productCategories}
+            distinctFinishes={distinctFinishes}
+          />
+        </section>
+      )}
 
       <section className="mt-10">
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">
@@ -397,6 +405,7 @@ export default async function ProductsPage({
                 productCategories={productCategories}
                 distinctFinishes={distinctFinishes}
                 priceProvenance={priceProvenanceById.get(product.id) ?? null}
+                showCosts={showCosts}
               />
             ))}
           </ul>

@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { ActualCostRow, OrderWithRefs } from "@/lib/supabase/types";
 import { InstructiveMessage } from "@/components/admin/InstructiveMessage";
 import { ORDER_STATUS_BADGE, ORDER_STATUS_LABELS, computeActualCostTotals } from "@/lib/orders/format";
+import { requireAdminArea } from "@/lib/roles/guards";
 import { formatUsd } from "@/lib/quotes/format";
 
 export const metadata = {
@@ -10,6 +11,9 @@ export const metadata = {
 };
 
 export default async function OrdersPage() {
+  // Staff run fulfilment; the money actually spent is founder-only.
+  const { showCosts } = await requireAdminArea("orders");
+
   let supabase;
   try {
     supabase = await createClient();
@@ -55,7 +59,7 @@ export default async function OrdersPage() {
   // stored (see lib/orders/format.ts's convertAtQuoteRate header).
   const orderIds = orders.map((o) => o.id);
   let actualsByOrder = new Map<string, { amountUsd: number | null; amountJmd: number | null }>();
-  if (orderIds.length > 0) {
+  if (orderIds.length > 0 && showCosts) {
     const { data: costsData } = await supabase
       .from("actual_costs")
       .select("order_id, category, amount_usd, amount_jmd")
@@ -104,7 +108,7 @@ export default async function OrdersPage() {
                   <th className="px-3 py-2">Project</th>
                   <th className="px-3 py-2">Client</th>
                   <th className="px-3 py-2 text-right">Quoted total USD</th>
-                  <th className="px-3 py-2 text-right">Actuals to date USD</th>
+                  {showCosts && <th className="px-3 py-2 text-right">Actuals to date USD</th>}
                   <th className="px-3 py-2">Created</th>
                 </tr>
               </thead>
@@ -149,9 +153,11 @@ export default async function OrdersPage() {
                       <td className="px-3 py-2 text-right text-sm text-veridan-ink">
                         {formatUsd(order.quotes?.total_client_usd ?? null)}
                       </td>
-                      <td className="px-3 py-2 text-right text-sm font-medium text-veridan-ink">
-                        {actuals?.amountUsd != null ? formatUsd(actuals.amountUsd) : "—"}
-                      </td>
+                      {showCosts && (
+                        <td className="px-3 py-2 text-right text-sm font-medium text-veridan-ink">
+                          {actuals?.amountUsd != null ? formatUsd(actuals.amountUsd) : "—"}
+                        </td>
+                      )}
                       <td className="px-3 py-2 text-sm text-veridan-warm-gray">
                         {new Date(order.created_at).toLocaleDateString()}
                       </td>

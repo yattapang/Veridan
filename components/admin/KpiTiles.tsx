@@ -22,9 +22,21 @@ function quarterLabel(range: DashboardKpis["quarterRange"]): string {
   return `Q${q} ${year}`;
 }
 
-export function KpiTiles({ kpis }: { kpis: DashboardKpis }) {
+/**
+ * `showValues` is the founder/staff switch (canViewCosts). Conversion rate and
+ * turnaround are operational and stay visible to everyone; the average
+ * accepted ORDER VALUE tile is money, so it is not rendered at all for staff —
+ * the number is never sent to the browser, not merely hidden with CSS.
+ */
+export function KpiTiles({
+  kpis,
+  showValues = true,
+}: {
+  kpis: DashboardKpis;
+  showValues?: boolean;
+}) {
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+    <div className={`grid grid-cols-1 gap-4 ${showValues ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
       <div className="rounded-md border border-veridan-warm-gray-light bg-white px-5 py-4">
         <p className="text-xs font-medium uppercase tracking-wide text-veridan-warm-gray">
           Quote-to-order conversion ({quarterLabel(kpis.quarterRange)})
@@ -47,18 +59,20 @@ export function KpiTiles({ kpis }: { kpis: DashboardKpis }) {
         <p className="mt-1 text-xs text-veridan-warm-gray">Average, business days (weekends excluded)</p>
       </div>
 
-      <div className="rounded-md border border-veridan-warm-gray-light bg-white px-5 py-4">
-        <p className="text-xs font-medium uppercase tracking-wide text-veridan-warm-gray">
-          Average accepted order value
-        </p>
-        <p className="mt-1 text-2xl font-semibold text-veridan-ink">
-          {formatJmd(kpis.averageOrderValue.avgJmd)}
-        </p>
-        <p className="mt-1 text-xs text-veridan-warm-gray">
-          {formatUsd(kpis.averageOrderValue.avgUsd)} &middot; {kpis.averageOrderValue.count} accepted quote
-          {kpis.averageOrderValue.count === 1 ? "" : "s"}
-        </p>
-      </div>
+      {showValues && (
+        <div className="rounded-md border border-veridan-warm-gray-light bg-white px-5 py-4">
+          <p className="text-xs font-medium uppercase tracking-wide text-veridan-warm-gray">
+            Average accepted order value
+          </p>
+          <p className="mt-1 text-2xl font-semibold text-veridan-ink">
+            {formatJmd(kpis.averageOrderValue.avgJmd)}
+          </p>
+          <p className="mt-1 text-xs text-veridan-warm-gray">
+            {formatUsd(kpis.averageOrderValue.avgUsd)} &middot; {kpis.averageOrderValue.count} accepted quote
+            {kpis.averageOrderValue.count === 1 ? "" : "s"}
+          </p>
+        </div>
+      )}
     </div>
   );
 }

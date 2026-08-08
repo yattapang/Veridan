@@ -24,7 +24,13 @@ export interface TeamUserRow extends UserRow {
   created_at: string;
 }
 
-export type UserAdminAuditAction = "invite" | "role_change" | "deactivate" | "reactivate";
+export type UserAdminAuditAction =
+  | "invite"
+  | "role_change"
+  | "deactivate"
+  | "reactivate"
+  | "delete"
+  | "password_reset";
 
 export interface UserAdminAuditLogRow {
   id: string;

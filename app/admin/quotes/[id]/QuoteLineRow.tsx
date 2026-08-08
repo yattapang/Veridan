@@ -10,7 +10,15 @@ const inputClass =
   "w-full rounded-md border border-veridan-warm-gray-light bg-white px-3 py-2 text-sm text-veridan-ink focus:border-veridan-accent focus:outline-none";
 const labelClass = "block text-xs font-medium uppercase tracking-wide text-veridan-warm-gray";
 
-/** One line_item-mode quote line, with inline edit/remove (Task 17). */
+/**
+ * One line_item-mode quote line, with inline edit/remove (Task 17).
+ *
+ * `showCosts` is the founder/staff switch. When false the Landed USD cell is
+ * not rendered (the number is still passed in from the server page, which
+ * itself only passes it when the viewer is a founder), and the inline editor —
+ * which contains unit cost and cost currency fields — is unreachable. The
+ * matching server action re-checks the role regardless.
+ */
 export function QuoteLineRow({
   quoteId,
   line,
@@ -19,6 +27,7 @@ export function QuoteLineRow({
   clientPriceUsd,
   clientPriceJmd,
   isDraft,
+  showCosts = true,
 }: {
   quoteId: string;
   line: QuoteLineItemWithDetails;
@@ -27,6 +36,7 @@ export function QuoteLineRow({
   clientPriceUsd: number | null;
   clientPriceJmd: number | null;
   isDraft: boolean;
+  showCosts?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -170,13 +180,15 @@ export function QuoteLineRow({
         )}
       </td>
       <td className="px-4 py-2 text-right text-veridan-warm-gray">{line.qty}</td>
-      <td className="px-4 py-2 text-right text-veridan-ink">{formatUsd(landedCostUsd ?? line.landed_cost_usd)}</td>
+      {showCosts && (
+        <td className="px-4 py-2 text-right text-veridan-ink">{formatUsd(landedCostUsd ?? line.landed_cost_usd)}</td>
+      )}
       <td className="px-4 py-2 text-right text-veridan-ink">{clientPriceUsd != null ? formatUsd(clientPriceUsd) : "—"}</td>
       <td className="px-4 py-2 text-right font-medium text-veridan-ink">
         {clientPriceJmd != null ? `J$${clientPriceJmd.toLocaleString("en-US", { maximumFractionDigits: 2 })}` : "—"}
       </td>
       <td className="px-4 py-2 text-right">
-        {isDraft && (
+        {isDraft && showCosts && (
           <div className="flex justify-end gap-3">
             <button
               type="button"

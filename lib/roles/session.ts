@@ -15,6 +15,7 @@ export interface RawUserRow {
   email: string;
   display_name: string | null;
   role: string;
+  /** Optional so a pre-migration row (no column) is still accepted as active. */
   active?: boolean | null;
   deleted_at?: string | null;
 }
@@ -53,7 +54,9 @@ export function resolveSessionUser(
       email: row.email,
       display_name: row.display_name,
       role: row.role,
-      active: row.active !== false,
+      // Narrowed to true/null/undefined by the guard above; a row with no
+      // `active` column at all (pre-migration) counts as active.
+      active: row.active ?? true,
     };
   }
 

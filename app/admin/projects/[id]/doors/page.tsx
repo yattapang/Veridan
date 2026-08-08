@@ -11,6 +11,7 @@ import type {
 import { InstructiveMessage } from "@/components/admin/InstructiveMessage";
 import { countDoorsByHardwareSet } from "@/lib/doors";
 import { summarizeSetUsd, type SupplierFxRates } from "@/lib/hardware-sets";
+import { requireAdminArea } from "@/lib/roles/guards";
 import { DoorAddForm } from "./DoorAddForm";
 import { DoorRow } from "./DoorRow";
 
@@ -28,6 +29,9 @@ export default async function DoorRegisterPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  // Per-door subtotals are indicative supplier cost — founder-only.
+  const { showCosts } = await requireAdminArea("projects");
+
   const { id: projectId } = await params;
 
   let supabase;
@@ -227,7 +231,8 @@ export default async function DoorRegisterPage({
                       door={door}
                       rowNumber={index + 1}
                       sets={sets}
-                      subtotalUsd={subtotal && subtotal.lineCount > 0 ? subtotal.subtotalUsd : null}
+                      subtotalUsd={showCosts && subtotal && subtotal.lineCount > 0 ? subtotal.subtotalUsd : null}
+                      showCosts={showCosts}
                       subtotalIncomplete={subtotal?.incomplete ?? false}
                     />
                   );

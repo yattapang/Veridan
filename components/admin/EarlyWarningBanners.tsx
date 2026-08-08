@@ -8,8 +8,17 @@ import type { DashboardKpis } from "@/lib/pipeline-data";
  * - Margin: any accepted quote's effective margin below the 20% floor (red
  *   — a realized-margin breach is worse than a soft conversion dip).
  */
-export function EarlyWarningBanners({ kpis }: { kpis: DashboardKpis }) {
-  if (!kpis.conversionEarlyWarning && kpis.marginBreaches.length === 0) return null;
+export function EarlyWarningBanners({
+  kpis,
+  showMargins = true,
+}: {
+  kpis: DashboardKpis;
+  showMargins?: boolean;
+}) {
+  // The margin banner names quotes and prints their effective margin — costs
+  // and margins are founder-only, so for staff it is not rendered at all.
+  const marginBreaches = showMargins ? kpis.marginBreaches : [];
+  if (!kpis.conversionEarlyWarning && marginBreaches.length === 0) return null;
 
   return (
     <div className="mb-6 flex flex-col gap-3">
@@ -23,14 +32,14 @@ export function EarlyWarningBanners({ kpis }: { kpis: DashboardKpis }) {
           </p>
         </div>
       )}
-      {kpis.marginBreaches.length > 0 && (
+      {marginBreaches.length > 0 && (
         <div className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900">
           <p className="font-medium">
-            {kpis.marginBreaches.length} accepted order{kpis.marginBreaches.length === 1 ? "" : "s"} below
+            {marginBreaches.length} accepted order{marginBreaches.length === 1 ? "" : "s"} below
             the 20% margin floor
           </p>
           <ul className="mt-1 list-inside list-disc text-red-800">
-            {kpis.marginBreaches.map((b) => (
+            {marginBreaches.map((b) => (
               <li key={b.id}>
                 <Link href={`/admin/quotes/${b.id}`} className="underline underline-offset-2">
                   {b.quote_ref}

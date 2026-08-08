@@ -129,11 +129,19 @@ const AREA_ACCESS: Record<AdminArea, readonly UserRole[]> = {
   account: BOTH,
 };
 
-/** The single access decision. Unknown areas deny. */
+/**
+ * The single access decision. Unknown areas deny.
+ *
+ * `Object.hasOwn` rather than a bare index lookup on purpose: `AREA_ACCESS` is
+ * an object literal, so `AREA_ACCESS["constructor"]` or `["__proto__"]` would
+ * otherwise return something truthy off the prototype chain and this function
+ * would throw (or worse, be coaxed into a decision) on an attacker-chosen area
+ * string. Own-property check first, then the membership test.
+ */
 export function canAccessAdminArea(role: UserRole, area: AdminArea | string): boolean {
-  const allowed = (AREA_ACCESS as Record<string, readonly UserRole[] | undefined>)[area];
-  if (!allowed) return false;
-  return allowed.includes(role);
+  if (typeof area !== "string" || !Object.hasOwn(AREA_ACCESS, area)) return false;
+  const allowed = (AREA_ACCESS as Record<string, readonly UserRole[]>)[area];
+  return Array.isArray(allowed) && allowed.includes(role);
 }
 
 export function isFounderOnlyArea(area: AdminArea): boolean {

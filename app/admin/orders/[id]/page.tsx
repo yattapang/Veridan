@@ -15,6 +15,7 @@ import { StatusPanel } from "./StatusPanel";
 import { ActualCostForm } from "./ActualCostForm";
 import { ActualCostRow } from "./ActualCostRow";
 import { NotesForm } from "./NotesForm";
+import { requireAdminArea } from "@/lib/roles/guards";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -42,6 +43,11 @@ interface OrderDetailQuote {
 }
 
 export default async function OrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  // Staff run fulfilment here — status, dates, notes. What the order actually
+  // COST is founder-only, so the actuals are neither fetched nor rendered for
+  // them (actual_costs RLS denies them the rows too).
+  const { showCosts } = await requireAdminArea("orders");
+
   const { id } = await params;
 
   let supabase;
@@ -76,14 +82,16 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
     companies: { id: string; name: string } | null;
   };
 
-  const [costsResult, suppliersResult] = await Promise.all([
-    supabase
-      .from("actual_costs")
-      .select("*, suppliers(id, name)")
-      .eq("order_id", order.id)
-      .order("incurred_date", { ascending: false }),
-    supabase.from("suppliers").select("*").eq("active", true).order("name"),
-  ]);
+  const [costsResult, suppliersResult] = showCosts
+    ? await Promise.all([
+        supabase
+          .from("actual_costs")
+          .select("*, suppliers(id, name)")
+          .eq("order_id", order.id)
+          .order("incurred_date", { ascending: false }),
+        supabase.from("suppliers").select("*").eq("active", true).order("name"),
+      ])
+    : [{ data: [] as ActualCostWithSupplier[] }, { data: [] as SupplierRow[] }];
 
   const costs = (costsResult.data as unknown as ActualCostWithSupplier[]) ?? [];
   const suppliers = (suppliersResult.data as SupplierRow[]) ?? [];
@@ -154,7 +162,8 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
         )}
       </section>
 
-      {/* Quoted vs actuals comparison */}
+      {/* Quoted vs actuals comparison — founder-only (it is the cost side). */}
+      {showCosts && (
       <section className="mt-8 rounded-md border border-veridan-warm-gray-light bg-white px-5 py-5">
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">
           Quoted vs. actuals to date
@@ -210,8 +219,10 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           </div>
         )}
       </section>
+      )}
 
-      {/* Actual costs */}
+      {/* Actual costs — founder-only, entry included. */}
+      {showCosts && (
       <section className="mt-8">
         <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">Actual costs</h2>
         <p className="mb-3 text-xs text-veridan-warm-gray">
@@ -256,6 +267,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           </div>
         )}
       </section>
+      )}
 
       {/* Notes */}
       <section className="mt-8 rounded-md border border-veridan-warm-gray-light bg-white px-5 py-5">

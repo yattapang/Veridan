@@ -36,6 +36,7 @@ import { signQuotePdfUrl } from "@/lib/storage";
 import type { InvoiceRow } from "@/lib/supabase/types";
 import { INVOICE_STATUS_BADGE, INVOICE_STATUS_LABELS, INVOICE_TYPE_LABELS } from "@/lib/invoices/format";
 import { formatJmd } from "@/lib/quotes/format";
+import { requireAdminArea } from "@/lib/roles/guards";
 
 const MODE_LABELS: Record<string, string> = {
   door_register: "Door Register mode",
@@ -73,6 +74,11 @@ export default async function QuoteBuilderPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
+  // Staff may open a quote, but never its cost/margin internals. `showCosts`
+  // drives every removal below; each corresponding server action re-checks the
+  // role for itself, so this is presentation, not the boundary.
+  const { showCosts } = await requireAdminArea("quotes");
+
   const { id } = await params;
   const query = await searchParams;
   const pq = firstParam(query.pq).trim();
@@ -146,11 +152,13 @@ export default async function QuoteBuilderPage({
       )
       .eq("quote_id", id)
       .order("sort_order"),
-    supabase
-      .from("override_log")
-      .select("*, users(id, email, display_name)")
-      .eq("quote_id", id)
-      .order("created_at", { ascending: false }),
+    showCosts
+      ? supabase
+          .from("override_log")
+          .select("*, users(id, email, display_name)")
+          .eq("quote_id", id)
+          .order("created_at", { ascending: false })
+      : Promise.resolve({ data: [] as OverrideLogWithUser[], error: null }),
     isLineItemMode
       ? supabase.from("suppliers").select("*").eq("active", true).order("name")
       : Promise.resolve({ data: [] as SupplierRow[], error: null }),
@@ -402,10 +410,11 @@ export default async function QuoteBuilderPage({
       {/* FX snapshot */}
       <section className="mt-8 rounded-md border border-veridan-warm-gray-light bg-white px-5 py-5">
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">FX snapshot</h2>
-        <FxSnapshotPanel quoteId={quote.id} fx={quote.fx_snapshot} isDraft={isDraft} />
+        <FxSnapshotPanel quoteId={quote.id} fx={quote.fx_snapshot} isDraft={isDraft && showCosts} />
       </section>
 
-      {/* Origin cost pools */}
+      {/* Origin cost pools — founder-only: every figure here is supplier cost. */}
+      {showCosts && (
       <section className="mt-8">
         <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">
           Shipment origins
@@ -433,9 +442,11 @@ export default async function QuoteBuilderPage({
           </div>
         )}
       </section>
+      )}
 
-      {/* Line breakdown grouped per door (door_register mode) */}
-      {!isLineItemMode && result.lines.length > 0 && (
+      {/* Line breakdown grouped per door (door_register mode) — the three cost
+          columns are founder-only; staff still see what is on each door. */}
+      {!isLineItemMode && result.lines.length > 0 && showCosts && (
         <section className="mt-8">
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">
             Line breakdown by door
@@ -453,7 +464,7 @@ export default async function QuoteBuilderPage({
                       <th className="px-4 py-2 text-right">Qty</th>
                       <th className="px-4 py-2 text-right">Supplier cost USD</th>
                       <th className="px-4 py-2 text-right">Allocated shipment USD</th>
-                      <th className="px-4 py-2 text-right">Landed USD</th>
+                      {showCosts && <th className="px-4 py-2 text-right">Landed USD</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -495,7 +506,7 @@ export default async function QuoteBuilderPage({
                   <tr className="border-b border-veridan-warm-gray-light bg-veridan-warm-gray-pale/60 text-[10px] font-semibold uppercase tracking-wide text-veridan-warm-gray">
                     <th className="px-4 py-2">Line</th>
                     <th className="px-4 py-2 text-right">Qty</th>
-                    <th className="px-4 py-2 text-right">Landed USD</th>
+                    {showCosts && <th className="px-4 py-2 text-right">Landed USD</th>}
                     <th className="px-4 py-2 text-right">Client USD</th>
                     <th className="px-4 py-2 text-right">Client JMD</th>
                     <th className="px-4 py-2" />
@@ -510,7 +521,8 @@ export default async function QuoteBuilderPage({
                         quoteId={quote.id}
                         line={line}
                         suppliers={suppliers}
-                        landedCostUsd={lr?.landedCostUsd ?? line.landed_cost_usd}
+                        landedCostUsd={showCosts ? lr?.landedCostUsd ?? line.landed_cost_usd : null}
+                        showCosts={showCosts}
                         clientPriceUsd={lr?.clientPriceUsdRounded ?? null}
                         clientPriceJmd={lr?.clientPriceJmdRounded ?? null}
                         isDraft={isDraft}
@@ -522,7 +534,7 @@ export default async function QuoteBuilderPage({
             </div>
           )}
 
-          {isDraft && (
+          {isDraft && showCosts && (
             <div className="rounded-md border border-veridan-warm-gray-light bg-white px-5 py-5">
               <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-veridan-warm-gray">Add a line</h3>
               <form method="get" className="mb-4 grid gap-3 sm:grid-cols-4">
@@ -589,7 +601,35 @@ export default async function QuoteBuilderPage({
         </section>
       )}
 
-      {/* Margin + totals + override gate */}
+      {/* Margin + totals + override gate — founder-only. Staff get the CLIENT
+          price totals only (what the customer is quoted), with no landed cost,
+          no margin percentage, no per-line breakdown and no override gate. */}
+      {!showCosts && result.lines.length > 0 && (
+        <section className="mt-8 rounded-md border border-veridan-warm-gray-light bg-white px-5 py-5">
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">
+            Client pricing
+          </h2>
+          <dl className="grid grid-cols-1 gap-3 rounded-md border border-veridan-warm-gray-light bg-veridan-warm-gray-pale/40 px-5 py-4 sm:grid-cols-2">
+            <div>
+              <dt className="text-xs text-veridan-warm-gray">Total client price (USD)</dt>
+              <dd className="text-lg font-semibold text-veridan-ink">
+                {formatUsd(result.totals.clientPriceUsd)}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-veridan-warm-gray">Total client price (JMD)</dt>
+              <dd className="text-lg font-semibold text-veridan-ink">
+                {formatJmd(result.totals.clientPriceJmd)}
+              </dd>
+            </div>
+          </dl>
+          <p className="mt-3 text-xs text-veridan-warm-gray">
+            Cost and margin figures are limited to founder accounts.
+          </p>
+        </section>
+      )}
+
+      {showCosts && (
       <section className="mt-8 rounded-md border border-veridan-warm-gray-light bg-white px-5 py-5">
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">
           Margin &amp; client pricing
@@ -615,8 +655,11 @@ export default async function QuoteBuilderPage({
           />
         )}
       </section>
+      )}
 
-      {/* Logged overrides */}
+      {/* Logged overrides — every row is a margin figure, so founder-only.
+          (RLS on override_log now denies staff at the database too.) */}
+      {showCosts && (
       <section className="mt-8">
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">
           Overrides on this quote
@@ -639,8 +682,13 @@ export default async function QuoteBuilderPage({
           </ul>
         )}
       </section>
+      )}
 
-      {/* Linked invoices + customs-cleared trigger (Tasks 46/47) */}
+      {/* Linked invoices + customs-cleared trigger (Tasks 46/47). Invoicing is
+          a founder-only area, so neither the invoice list nor the
+          customs-cleared trigger (which raises the balance invoice) is shown to
+          staff — and invoices RLS denies them the rows anyway. */}
+      {showCosts && (
       <section className="mt-8">
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">Invoices</h2>
         {invoices.length === 0 ? (
@@ -686,8 +734,9 @@ export default async function QuoteBuilderPage({
           </div>
         )}
       </section>
+      )}
 
-      {/* Order + fulfillment tracking (Task 52/53) */}
+      {/* Order + fulfillment tracking (Task 52/53) — orders are staff work. */}
       {quote.status === "accepted" && (
         <section className="mt-8 rounded-md border border-veridan-warm-gray-light bg-white px-5 py-5">
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">

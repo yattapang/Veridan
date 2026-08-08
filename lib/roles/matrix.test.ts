@@ -33,6 +33,9 @@ const STAFF_ALLOWED: AdminArea[] = [
   "articles",
   "catalogue",
   "content",
+  // Your own profile / password. Staff must be able to manage their own
+  // credentials without a founder ever handling them.
+  "account",
 ];
 
 const STAFF_DENIED: AdminArea[] = [

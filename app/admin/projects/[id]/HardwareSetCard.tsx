@@ -6,14 +6,22 @@ function formatUsd(amount: number): string {
   return amount.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
 }
 
+/**
+ * `showCosts` is the founder/staff switch: the right-hand figure is an
+ * indicative SUPPLIER COST subtotal for the set, so staff see the line count
+ * only. The set's detail page (which is nothing but unit costs) is gated whole
+ * by app/admin/projects/[id]/hardware-sets/layout.tsx.
+ */
 export function HardwareSetCard({
   projectId,
   set,
   summary,
+  showCosts = true,
 }: {
   projectId: string;
   set: HardwareSetRow;
   summary: HardwareSetUsdSummary;
+  showCosts?: boolean;
 }) {
   return (
     <li className="border-b border-veridan-warm-gray-light py-4 last:border-b-0">
@@ -31,14 +39,16 @@ export function HardwareSetCard({
             {set.cloned_from_set_id ? " · cloned" : ""}
           </p>
         </div>
-        <div className="text-right">
-          <p className="text-sm font-medium text-veridan-ink">
-            {summary.lineCount === 0 ? "—" : formatUsd(summary.subtotalUsd)}
-          </p>
-          <p className="text-[10px] uppercase tracking-wide text-veridan-warm-gray">
-            Indicative supplier cost{summary.incomplete ? " · partial" : ""}
-          </p>
-        </div>
+        {showCosts && (
+          <div className="text-right">
+            <p className="text-sm font-medium text-veridan-ink">
+              {summary.lineCount === 0 ? "—" : formatUsd(summary.subtotalUsd)}
+            </p>
+            <p className="text-[10px] uppercase tracking-wide text-veridan-warm-gray">
+              Indicative supplier cost{summary.incomplete ? " · partial" : ""}
+            </p>
+          </div>
+        )}
       </Link>
     </li>
   );

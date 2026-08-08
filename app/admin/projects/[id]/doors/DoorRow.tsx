@@ -20,6 +20,7 @@ export function DoorRow({
   sets,
   subtotalUsd,
   subtotalIncomplete,
+  showCosts = true,
 }: {
   projectId: string;
   door: DoorWithHardwareSet;
@@ -27,6 +28,8 @@ export function DoorRow({
   sets: HardwareSetRow[];
   subtotalUsd: number | null;
   subtotalIncomplete: boolean;
+  /** Founder-only: the subtotal is an indicative supplier cost. */
+  showCosts?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -150,7 +153,7 @@ export function DoorRow({
         ) : (
           <span className="text-xs font-medium uppercase tracking-wide text-red-600">No set</span>
         )}
-        {subtotalUsd != null && (
+        {showCosts && subtotalUsd != null && (
           <span className="ml-1 text-xs text-veridan-warm-gray">
             ({formatUsd(subtotalUsd)}
             {subtotalIncomplete ? " · partial" : ""})

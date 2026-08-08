@@ -22,6 +22,13 @@ export interface ProductPriceProvenance {
   fileUrl: string | null;
 }
 
+/**
+ * `showCosts` is the founder/staff switch. For staff the unit-cost line, the
+ * price-file provenance line (which names the supplier price list a cost came
+ * from) and the Edit / Archive controls are all withheld — editing a product IS
+ * cost entry. createProduct / updateProduct / setProductActive re-check the role
+ * server-side regardless.
+ */
 export function ProductListItem({
   product,
   suppliers,
@@ -29,6 +36,7 @@ export function ProductListItem({
   productCategories,
   distinctFinishes,
   priceProvenance,
+  showCosts = true,
 }: {
   product: ProductWithSupplier;
   suppliers: SupplierRow[];
@@ -36,6 +44,7 @@ export function ProductListItem({
   productCategories: ManagedProductCategory[];
   distinctFinishes: DistinctFinishValues;
   priceProvenance?: ProductPriceProvenance | null;
+  showCosts?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -89,7 +98,9 @@ export function ProductListItem({
           {product.catalogue_ref ? ` · cat# ${product.catalogue_ref}` : ""}
         </p>
         <p className="mt-1 text-xs text-veridan-ink/70">
-          {formatCost(product.unit_cost, product.cost_currency)} / {product.unit}
+          {showCosts
+            ? `${formatCost(product.unit_cost, product.cost_currency)} / ${product.unit}`
+            : `per ${product.unit}`}
           {product.suppliers ? ` · ${product.suppliers.name}` : ""}
         </p>
         {(product.item_groups || product.finish_code || product.design_series) && (
@@ -101,7 +112,7 @@ export function ProductListItem({
             {product.design_series ? ` · ${product.design_series}` : ""}
           </p>
         )}
-        {priceProvenance && (
+        {showCosts && priceProvenance && (
           <p className="mt-1 text-[11px] text-veridan-warm-gray">
             Last updated {formatDate(priceProvenance.effectiveDate)} from{" "}
             {priceProvenance.fileUrl ? (
@@ -126,7 +137,7 @@ export function ProductListItem({
       </div>
 
       <div className="flex shrink-0 items-center gap-3">
-        {product.item_group_id && (
+        {showCosts && product.item_group_id && (
           <a
             href={`/admin/products/compare/${product.item_group_id}`}
             className="text-xs font-medium text-veridan-accent underline underline-offset-2 hover:text-veridan-accent-soft"
@@ -134,21 +145,25 @@ export function ProductListItem({
             Compare offerings
           </a>
         )}
-        <button
-          type="button"
-          onClick={() => setEditing(true)}
-          className="text-xs font-medium text-veridan-accent underline underline-offset-2 hover:text-veridan-accent-soft"
-        >
-          Edit
-        </button>
-        <button
-          type="button"
-          onClick={toggleActive}
-          disabled={pending}
-          className="text-xs font-medium text-veridan-warm-gray underline underline-offset-2 hover:text-veridan-ink disabled:opacity-50"
-        >
-          {pending ? "Saving…" : product.active ? "Archive" : "Restore"}
-        </button>
+        {showCosts && (
+          <>
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              className="text-xs font-medium text-veridan-accent underline underline-offset-2 hover:text-veridan-accent-soft"
+            >
+              Edit
+            </button>
+            <button
+              type="button"
+              onClick={toggleActive}
+              disabled={pending}
+              className="text-xs font-medium text-veridan-warm-gray underline underline-offset-2 hover:text-veridan-ink disabled:opacity-50"
+            >
+              {pending ? "Saving…" : product.active ? "Archive" : "Restore"}
+            </button>
+          </>
+        )}
       </div>
     </li>
   );

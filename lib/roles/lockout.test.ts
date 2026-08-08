@@ -238,6 +238,14 @@ describe("checkDelete", () => {
     expect(checkDelete(users, "ken", "kay")).toEqual({ ok: true });
   });
 
+  it("BLOCKS deleting the only founder RECORD, even when it is already locked out", () => {
+    // A locked-out sole founder is still the way back in once restored.
+    const users = [{ ...KEN, active: false }, SAM];
+    const result = checkDelete(users, "sam", "ken");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/only founder account/i);
+  });
+
   it("BLOCKS deleting an already-removed account", () => {
     const result = checkDelete([KEN, KAY, REMOVED], "ken", "gone");
     expect(result.ok).toBe(false);

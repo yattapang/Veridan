@@ -9,6 +9,7 @@ import {
   formatUsd,
 } from "@/lib/quotes/format";
 import { isComputedExpired } from "@/lib/quotes/workflow";
+import { requireAdminArea } from "@/lib/roles/guards";
 
 export const metadata = {
   title: "Quotes",
@@ -20,6 +21,9 @@ const MODE_LABELS: Record<string, string> = {
 };
 
 export default async function QuotesPage() {
+  // Staff may see quotes, but never the landed-cost column.
+  const { showCosts } = await requireAdminArea("quotes");
+
   let supabase;
   try {
     supabase = await createClient();
@@ -87,7 +91,7 @@ export default async function QuotesPage() {
                   <th className="px-3 py-2">Mode</th>
                   <th className="px-3 py-2">Project</th>
                   <th className="px-3 py-2">Client</th>
-                  <th className="px-3 py-2 text-right">Landed USD</th>
+                  {showCosts && <th className="px-3 py-2 text-right">Landed USD</th>}
                   <th className="px-3 py-2 text-right">Client JMD</th>
                 </tr>
               </thead>
@@ -135,9 +139,11 @@ export default async function QuotesPage() {
                     <td className="px-3 py-2 text-sm text-veridan-warm-gray">
                       {quote.projects?.companies?.name ?? "—"}
                     </td>
-                    <td className="px-3 py-2 text-right text-sm text-veridan-ink">
-                      {formatUsd(quote.total_landed_usd)}
-                    </td>
+                    {showCosts && (
+                      <td className="px-3 py-2 text-right text-sm text-veridan-ink">
+                        {formatUsd(quote.total_landed_usd)}
+                      </td>
+                    )}
                     <td className="px-3 py-2 text-right text-sm font-medium text-veridan-ink">
                       {formatJmd(quote.total_client_jmd)}
                     </td>
