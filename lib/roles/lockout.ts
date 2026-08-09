@@ -10,6 +10,15 @@
  * (supabase/migrations/20260807000004_user_roles.sql), so even a direct SQL
  * mistake cannot leave the company with no way back in. These functions exist so
  * the founder gets a readable sentence instead of a Postgres exception.
+ *
+ * The same is true of the OWNER rules below: supabase/migrations/
+ * 20260808000001_owner_protection.sql enforces them with a BEFORE ROW trigger on
+ * public.users, which is the actual boundary. What these functions add is (a) a
+ * sentence that names the fix instead of a check_violation, and (b) a refusal
+ * that lands BEFORE any irreversible side effect — deleteTeamMember() destroys
+ * the Supabase Auth user before it ever touches public.users, so for that path
+ * the trigger would fire too late to prevent the damage. checkDelete() is what
+ * actually stops the owner's sign-in being destroyed.
  */
 
 import type { UserRole } from "./matrix";
@@ -21,6 +30,12 @@ export interface TeamMemberSnapshot {
   active: boolean;
   /** Set once the Supabase Auth account has been permanently deleted. */
   deleted_at?: string | null;
+  /**
+   * The ownership flag from public.users.is_owner. Optional so every existing
+   * caller and fixture keeps working: absent/undefined means "not the owner",
+   * which is the safe reading — it can only ever ADD a refusal, never remove one.
+   */
+  is_owner?: boolean | null;
 }
 
 export type LockoutCheck = { ok: true } | { ok: false; error: string };
@@ -37,6 +52,37 @@ export function countActiveFounders(users: readonly TeamMemberSnapshot[]): numbe
 
 function isRemoved(user: TeamMemberSnapshot): boolean {
   return Boolean(user.deleted_at);
+}
+
+// ---------------------------------------------------------------------------
+// Owner
+// ---------------------------------------------------------------------------
+
+/**
+ * The owner row, if there is one. At most one row can hold the flag (partial
+ * unique index in 20260808000001_owner_protection.sql), so `find` is exact
+ * rather than a first-match approximation.
+ */
+export function findOwner(
+  users: readonly TeamMemberSnapshot[]
+): TeamMemberSnapshot | undefined {
+  return users.find((u) => Boolean(u.is_owner));
+}
+
+export function isOwner(users: readonly TeamMemberSnapshot[], userId: string): boolean {
+  return findOwner(users)?.id === userId;
+}
+
+/**
+ * The one sentence every owner-protection refusal ends with. Kept in one place
+ * so the UI tooltip, the server action's error and this module cannot drift into
+ * saying three different things about the same rule.
+ */
+function ownerProtected(owner: TeamMemberSnapshot, what: string): LockoutCheck {
+  return deny(
+    `${owner.email} is the owner of this Veridan admin and cannot be ${what} — not by another founder, and not from the database either. ` +
+      `Ownership has to be transferred to another active founder first; after that they are an ordinary founder and the usual rules apply.`
+  );
 }
 
 /** The only founder left who can still sign in and administer the team. */
@@ -86,6 +132,17 @@ export function checkRoleChange(
   }
 
   if (target.role === nextRole) return OK;
+
+  // Checked BEFORE the self-demotion rule on purpose. Both would refuse an owner
+  // demoting themselves, but "transfer ownership first" is the sentence that
+  // names the actual fix, and it is also the message the database trigger
+  // raises — so the app and the backstop say the same thing rather than two
+  // different things about one rule. A promotion TO founder is never blocked
+  // here: it cannot reduce anyone's authority, and if an owner row were ever
+  // found sitting at 'staff' this is the statement that repairs it.
+  if (target.is_owner && nextRole !== "founder") {
+    return ownerProtected(target, "demoted");
+  }
 
   if (nextRole === "founder") {
     if (!target.active) {
@@ -147,6 +204,13 @@ export function checkActiveChange(
   if (target.active === nextActive) return OK;
   if (nextActive) return OK;
 
+  // Same ordering rationale as checkRoleChange: the owner rule is the one that
+  // says what to do about it, so it is raised ahead of the generic self-lockout
+  // and last-founder rules that would otherwise swallow it.
+  if (target.is_owner) {
+    return ownerProtected(target, "locked out");
+  }
+
   if (actorId === targetId) {
     return deny(
       "You cannot deactivate your own account — that would sign you out of the admin with no way back in."
@@ -184,6 +248,16 @@ export function checkDelete(
 
   if (isRemoved(target)) {
     return deny(`${target.email} has already been removed.`);
+  }
+
+  // THIS ONE IS NOT A COURTESY. deleteTeamMember() destroys the Supabase Auth
+  // user FIRST and only then stamps public.users.deleted_at, so the database
+  // trigger — which can only see the second half — would refuse the soft-delete
+  // after the sign-in had already been destroyed irreversibly. This check is
+  // what actually prevents that, which is why it sits ahead of every other rule
+  // here and is re-run server-side against a fresh read of the user table.
+  if (target.is_owner) {
+    return ownerProtected(target, "deleted");
   }
 
   if (actorId === targetId) {
@@ -252,6 +326,89 @@ export function checkDeleteConfirmation(typed: string): LockoutCheck {
   return typed.trim().toUpperCase() === DELETE_CONFIRMATION_WORD
     ? OK
     : deny(`Type ${DELETE_CONFIRMATION_WORD} in the confirmation box to permanently delete this sign-in.`);
+}
+
+/**
+ * The exact word the owner must type to confirm handing ownership over. Same
+ * typed-confirmation pattern as deletion (checkDeleteConfirmation above) rather
+ * than a second, differently-shaped confirmation idiom — this admin should have
+ * one way of asking "are you certain", not two.
+ */
+export const TRANSFER_OWNERSHIP_CONFIRMATION_WORD = "TRANSFER";
+
+export function checkTransferOwnershipConfirmation(typed: string): LockoutCheck {
+  return typed.trim().toUpperCase() === TRANSFER_OWNERSHIP_CONFIRMATION_WORD
+    ? OK
+    : deny(
+        `Type ${TRANSFER_OWNERSHIP_CONFIRMATION_WORD} in the confirmation box to hand ownership over.`
+      );
+}
+
+/**
+ * May `actorId` transfer ownership to `targetId`?
+ *
+ * Ownership is the one thing on this page that cannot be undone by the person
+ * who does it: the moment the flag moves, the old owner is an ordinary founder
+ * and the NEW owner is the only account that can move it again. So the rule is
+ * narrow — only the current owner may initiate, and only an active founder may
+ * receive.
+ *
+ * `actorId` must be the id the SERVER derived from the session, never anything
+ * the browser sent; app/admin/team/actions.ts passes `gate.session.user.id`.
+ * public.transfer_ownership() independently re-checks that its `p_from` really
+ * holds the flag, but it is a service-role function on a connection where
+ * auth.uid() is null — it can verify the id it was handed is the owner, not that
+ * the person driving the request IS that id. This function, run against a fresh
+ * read of the user table, is where those two facts are joined.
+ */
+export function checkOwnershipTransfer(
+  users: readonly TeamMemberSnapshot[],
+  actorId: string,
+  targetId: string
+): LockoutCheck {
+  const owner = findOwner(users);
+  if (!owner) {
+    return deny(
+      "No account is marked as the owner of this admin, so there is nothing to transfer. " +
+        "Check that supabase/migrations/20260808000001_owner_protection.sql has been applied."
+    );
+  }
+
+  if (owner.id !== actorId) {
+    return deny(
+      `Only ${owner.email} can transfer ownership, because only the owner can give it away. ` +
+        `Being a founder is not enough — that is the entire point of the owner flag.`
+    );
+  }
+
+  const target = findTarget(users, targetId);
+  if (!target) {
+    return deny("That user no longer exists. Reload the team page and try again.");
+  }
+
+  if (target.id === owner.id) {
+    return deny(`${owner.email} already owns this admin.`);
+  }
+
+  if (isRemoved(target)) {
+    return deny(
+      `${target.email} has been removed — their sign-in was permanently deleted, so they could never use the ownership.`
+    );
+  }
+
+  if (target.role !== "founder") {
+    return deny(
+      `Ownership can only go to a founder. Make ${target.email} a Founder first, then transfer — ownership carries no access of its own, so handing it to a staff account would protect a row that cannot administer anything.`
+    );
+  }
+
+  if (!target.active) {
+    return deny(
+      `${target.email} is locked out. Restore their access first — transferring ownership to an account that cannot sign in would leave nobody able to move it again.`
+    );
+  }
+
+  return OK;
 }
 
 /**

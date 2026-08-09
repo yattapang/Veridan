@@ -3,7 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { requireFounderPage } from "@/lib/roles/guards";
 import { normalizeRole } from "@/lib/roles/matrix";
 import { partitionTeam, teamMemberDisplayName } from "@/lib/roles/display";
-import { countActiveFounders, type TeamMemberSnapshot } from "@/lib/roles/lockout";
+import { countActiveFounders, findOwner, type TeamMemberSnapshot } from "@/lib/roles/lockout";
 import type { UserAdminAuditLogRow } from "@/lib/supabase/types";
 import { InstructiveMessage } from "@/components/admin/InstructiveMessage";
 import { InviteForm } from "./InviteForm";
@@ -20,6 +20,7 @@ const AUDIT_ACTION_LABELS: Record<string, string> = {
   reactivate: "Access restored",
   delete: "Account deleted",
   password_reset: "Password reset sent",
+  ownership_transfer: "Ownership transferred",
 };
 
 function formatDateTime(iso: string | null): string {
@@ -77,7 +78,9 @@ export default async function TeamPage() {
   const [usersResult, authListResult, auditResult] = await Promise.all([
     admin
       .from("users")
-      .select("id, email, display_name, role, active, invited_at, deactivated_at, deleted_at, created_at")
+      .select(
+        "id, email, display_name, role, active, invited_at, deactivated_at, deleted_at, created_at, is_owner"
+      )
       .order("created_at", { ascending: true }),
     admin.auth.admin.listUsers({ page: 1, perPage: 200 }),
     admin
@@ -111,6 +114,7 @@ export default async function TeamPage() {
           deactivated_at: string | null;
           deleted_at: string | null;
           created_at: string;
+          is_owner: boolean | null;
         }[]
       | null) ?? [];
 
@@ -130,6 +134,7 @@ export default async function TeamPage() {
     createdAt: row.created_at,
     lastSignInAt: row.deleted_at ? null : lastSignInById.get(row.id) ?? null,
     isSelf: row.id === session.user.id,
+    isOwner: row.is_owner === true,
   }));
 
   const snapshot: TeamMemberSnapshot[] = members.map((m) => ({
@@ -138,8 +143,18 @@ export default async function TeamPage() {
     role: m.role,
     active: m.active,
     deleted_at: m.deletedAt,
+    is_owner: m.isOwner,
   }));
   const activeFounders = countActiveFounders(snapshot);
+
+  // Who owns this admin, and is the person reading the page that owner? Both are
+  // derived from the SERVER's own read of the table plus the server-resolved
+  // session — the rows below use them to decide what to render, and the actions
+  // in ./actions.ts re-derive the same facts independently before acting on
+  // anything. Nothing here is an authorization decision; it decides what is
+  // worth showing and what needs explaining.
+  const owner = findOwner(snapshot);
+  const viewerIsOwner = owner?.id === session.user.id;
 
   const { current, removed } = partitionTeam(
     members.map((m) => ({ ...m, deleted_at: m.deletedAt, display_name: m.displayName }))
@@ -192,12 +207,44 @@ export default async function TeamPage() {
             ? "There is one active founder. They cannot be locked out, demoted, or deleted until another founder exists — otherwise nobody could manage the team, parameters, or finances."
             : `${activeFounders} active founders.`}
         </p>
+        <p className="mb-3 max-w-3xl text-xs text-veridan-warm-gray">
+          {owner ? (
+            <>
+              <strong className="text-veridan-ink">
+                {teamMemberDisplayName({
+                  display_name:
+                    members.find((m) => m.id === owner.id)?.displayName ?? null,
+                  email: owner.email,
+                  active: owner.active,
+                })}
+              </strong>{" "}
+              owns this admin. An owner is an ordinary Founder for everything they can
+              <em> see and do</em> — the flag grants no extra access. What it does is make that one
+              account impossible for anyone else to demote, lock out or delete, including from the
+              database directly. That protection is why a founder-level colleague can be given the
+              run of the business without also being given the ability to remove the person who owns
+              it.{" "}
+              {viewerIsOwner
+                ? "Because you are the owner, each other active founder below has a “Transfer ownership” option. Ownership moves in one step, and only the new owner can move it again."
+                : "Only the owner can hand ownership on, so nothing on this page lets you take it."}
+            </>
+          ) : (
+            <>
+              <strong className="text-veridan-ink">No owner is set.</strong> Every founder can
+              currently demote, lock out and delete every other founder. Apply{" "}
+              <code>supabase/migrations/20260808000001_owner_protection.sql</code> to mark the
+              owner&apos;s account and protect it.
+            </>
+          )}
+        </p>
         <ul className="rounded-md border border-veridan-warm-gray-light bg-white px-5">
           {current.map((member) => (
             <TeamMemberRow
               key={member.id}
               member={member}
               activeFounderCount={activeFounders}
+              viewerIsOwner={viewerIsOwner}
+              ownerEmail={owner?.email ?? null}
             />
           ))}
         </ul>
@@ -254,6 +301,15 @@ export default async function TeamPage() {
               const actor = nameById.get(entry.changed_by);
               const oldRole = (entry.old_value as { role?: string } | null)?.role;
               const newRole = (entry.new_value as { role?: string } | null)?.role;
+              const oldOwner = (entry.old_value as { owner_email?: string } | null)?.owner_email;
+              const newOwner = (entry.new_value as { owner_email?: string } | null)?.owner_email;
+              // public.transfer_ownership() writes a `reason` that restates the
+              // move in words. Every other row's reason means "this action
+              // partly failed", which is why it renders in amber — so showing
+              // it here would read as a warning about a transfer that went
+              // perfectly. The from → to pair below says the same thing without
+              // the alarm.
+              const showReason = Boolean(entry.reason) && entry.action !== "ownership_transfer";
               return (
                 <li
                   key={entry.id}
@@ -270,7 +326,13 @@ export default async function TeamPage() {
                         ({oldRole} → {newRole})
                       </span>
                     )}
-                    {entry.reason && (
+                    {entry.action === "ownership_transfer" && oldOwner && newOwner && (
+                      <span className="text-veridan-warm-gray">
+                        {" "}
+                        ({oldOwner} → {newOwner})
+                      </span>
+                    )}
+                    {showReason && (
                       <span className="block text-xs text-amber-700">{entry.reason}</span>
                     )}
                   </span>

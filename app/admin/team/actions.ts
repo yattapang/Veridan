@@ -11,8 +11,11 @@ import {
   checkDelete,
   checkDeleteConfirmation,
   checkInvite,
+  checkOwnershipTransfer,
   checkPasswordReset,
   checkRoleChange,
+  checkTransferOwnershipConfirmation,
+  findOwner,
   type TeamMemberSnapshot,
 } from "@/lib/roles/lockout";
 
@@ -78,13 +81,20 @@ async function loadTeamSnapshot(
 ): Promise<{ users: TeamMemberSnapshot[]; error: string | null }> {
   const { data, error } = await admin
     .from("users")
-    .select("id, email, role, active, deleted_at");
+    .select("id, email, role, active, deleted_at, is_owner");
 
   if (error) return { users: [], error: error.message };
 
   const users: TeamMemberSnapshot[] = (
     (data as
-      | { id: string; email: string; role: string; active: boolean; deleted_at: string | null }[]
+      | {
+          id: string;
+          email: string;
+          role: string;
+          active: boolean;
+          deleted_at: string | null;
+          is_owner: boolean | null;
+        }[]
       | null) ?? []
   ).map((u) => ({
     id: u.id,
@@ -92,6 +102,10 @@ async function loadTeamSnapshot(
     role: normalizeRole(u.role),
     active: u.active,
     deleted_at: u.deleted_at,
+    // Coerced rather than passed through: a null (column present but unset) and
+    // an undefined (pre-migration database) must both read as "not the owner",
+    // never as something truthy.
+    is_owner: u.is_owner === true,
   }));
 
   return { users, error: null };
@@ -488,5 +502,93 @@ export async function sendTeamMemberPasswordReset(
   return {
     ok: true,
     message: `A reset link was emailed to ${target.email}. Only they can see it — you never handle their password.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Ownership transfer
+// ---------------------------------------------------------------------------
+
+/**
+ * Hands ownership of this admin to another active founder.
+ *
+ * WHERE THE AUTHORITY COMES FROM — this is the most dangerous action on the
+ * page, so it is worth being explicit that nothing the browser sends is trusted
+ * with any part of the decision. The client supplies exactly one value: the id
+ * of the account that should RECEIVE ownership, plus the typed confirmation.
+ *
+ *   1. `requireFounderAction()` re-derives the session from the auth cookie and
+ *      re-reads the caller's own public.users row (getCurrentUser → RLS client),
+ *      so a locked-out or removed account is already gone by this point.
+ *   2. The team is re-read from the database with the service-role client.
+ *      `loadTeamSnapshot` is the only source of truth about who the owner is.
+ *   3. `checkOwnershipTransfer()` compares the SESSION'S id — never a form
+ *      field — against the live owner row, and validates the recipient.
+ *   4. `p_from` handed to the RPC is `gate.session.user.id`, again the session's
+ *      own id. There is deliberately no parameter by which a caller could name
+ *      a different "from"; a founder who is not the owner cannot express the
+ *      request at all, let alone have it accepted.
+ *   5. public.transfer_ownership() independently refuses unless p_from actually
+ *      holds the flag, and the BEFORE ROW trigger refuses unless the recipient
+ *      is an active founder. Three checks, each sufficient on its own.
+ *
+ * WHY AN RPC AND NOT TWO UPDATES: the flag must move atomically. Two PostgREST
+ * round trips could clear the old owner and then fail, leaving the company with
+ * no owner and no way to appoint one — and setting the new owner first would
+ * collide with the partial unique index. The function does clear-then-set inside
+ * one transaction, with both rows locked, so it either completes or does
+ * nothing. See §5 of 20260808000001_owner_protection.sql.
+ *
+ * NO writeUserAdminAudit CALL HERE, deliberately: the same function INSERTs the
+ * `ownership_transfer` audit row in that same transaction, so the record cannot
+ * be lost to a failure between the change and the log. This is the one team
+ * action whose audit row is written in SQL rather than by lib/roles/teamAudit.ts.
+ */
+export async function transferOwnership(
+  userId: string,
+  confirmation: string
+): Promise<TeamActionResult> {
+  const gate = await requireFounderAction("transfer ownership");
+  if (!gate.ok) return fail(gate.error);
+
+  const typed = checkTransferOwnershipConfirmation(confirmation);
+  if (!typed.ok) return fail(typed.error);
+
+  let admin;
+  try {
+    admin = createAdminClient();
+  } catch (err) {
+    return fail(err instanceof Error ? err.message : "Supabase admin is not configured.");
+  }
+
+  const snapshot = await loadTeamSnapshot(admin);
+  if (snapshot.error) return fail(`Could not read the current team (${snapshot.error}).`);
+
+  const allowed = checkOwnershipTransfer(snapshot.users, gate.session.user.id, userId);
+  if (!allowed.ok) return fail(allowed.error);
+
+  const target = snapshot.users.find((u) => u.id === userId);
+  const owner = findOwner(snapshot.users);
+  if (!target || !owner) return fail("That user no longer exists. Reload the team page.");
+
+  const { error } = await admin.rpc("transfer_ownership", {
+    p_from: gate.session.user.id,
+    p_to: userId,
+  });
+
+  if (error) {
+    // The trigger and the function are the real enforcement, and their messages
+    // are written to be read by a person — so pass them through rather than
+    // replacing them with a generic failure. Nothing was changed: the whole
+    // function body is one transaction, so a raise rolls all of it back.
+    return fail(`Ownership was not transferred: ${error.message}`);
+  }
+
+  revalidateTeam();
+  return {
+    ok: true,
+    message:
+      `${target.email} is now the owner of this Veridan admin. ` +
+      `You are an ordinary founder from here — you can no longer transfer ownership back yourself, only ${target.email} can.`,
   };
 }

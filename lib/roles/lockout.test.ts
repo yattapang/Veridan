@@ -1,14 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
   DELETE_CONFIRMATION_WORD,
+  TRANSFER_OWNERSHIP_CONFIRMATION_WORD,
   checkActiveChange,
   checkDelete,
   checkDeleteConfirmation,
   checkInvite,
+  checkOwnershipTransfer,
   checkPasswordReset,
   checkRoleChange,
+  checkTransferOwnershipConfirmation,
   countActiveFounders,
+  findOwner,
   isLastActiveFounder,
+  isOwner,
   type TeamMemberSnapshot,
 } from "./lockout";
 
@@ -306,5 +311,207 @@ describe("checkInvite", () => {
     const result = checkInvite(ONE_FOUNDER, "old@veridan.com");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toMatch(/reactivate/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Owner protection (supabase/migrations/20260808000001_owner_protection.sql)
+//
+// These cover the PURE half of the rule, which is what this suite can cover.
+// The same rules are ALSO enforced in the database by the
+// users_owner_protection BEFORE ROW trigger and by public.transfer_ownership(),
+// and those are deliberately not exercised here: this repo's tests are
+// pure-function tests with no Supabase client, real or mocked, anywhere in
+// them, and inventing one for this feature would test the mock rather than the
+// database. What is genuinely NOT testable without a live database, and is
+// covered by the UAT script instead:
+//   * that the trigger refuses the same operations when they arrive as raw SQL
+//     or through the service-role key rather than through these functions;
+//   * that transfer_ownership() is atomic, and that the partial unique index
+//     never permits two owners;
+//   * that the two triggers fire in the BEFORE-ROW-then-AFTER-STATEMENT order
+//     the migration header depends on.
+// ---------------------------------------------------------------------------
+
+/** KEN is the owner in these fixtures; KAY is the co-founder. */
+const OWNER: TeamMemberSnapshot = { ...KEN, is_owner: true };
+const OWNED_TEAM = [OWNER, KAY, SAM];
+
+describe("findOwner / isOwner", () => {
+  it("finds the flagged row", () => {
+    expect(findOwner(OWNED_TEAM)?.id).toBe("ken");
+    expect(isOwner(OWNED_TEAM, "ken")).toBe(true);
+    expect(isOwner(OWNED_TEAM, "kay")).toBe(false);
+  });
+
+  it("returns undefined when no row holds the flag", () => {
+    expect(findOwner(TWO_FOUNDERS)).toBeUndefined();
+    expect(isOwner(TWO_FOUNDERS, "ken")).toBe(false);
+    expect(findOwner([])).toBeUndefined();
+  });
+
+  it("treats a missing or null flag as 'not the owner'", () => {
+    // A pre-migration row, or a null column, must never read as truthy.
+    expect(isOwner([{ ...KEN, is_owner: null }, KAY], "ken")).toBe(false);
+    expect(isOwner([{ ...KEN, is_owner: false }, KAY], "ken")).toBe(false);
+  });
+});
+
+describe("owner protection inside the existing checks", () => {
+  it("BLOCKS another founder demoting the owner", () => {
+    const result = checkRoleChange(OWNED_TEAM, "kay", "ken", "staff");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toMatch(/owner/i);
+      expect(result.error).toMatch(/transferred/i);
+    }
+  });
+
+  it("BLOCKS another founder locking the owner out", () => {
+    const result = checkActiveChange(OWNED_TEAM, "kay", "ken", false);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/owner/i);
+  });
+
+  it("BLOCKS another founder deleting the owner, even once locked out", () => {
+    // The owner cannot actually reach the locked-out state, but the delete rule
+    // must not depend on that: it runs before deleteTeamMember() destroys the
+    // Supabase Auth user, which no database trigger can undo afterwards.
+    const lockedOwner = { ...OWNER, active: false };
+    const result = checkDelete([lockedOwner, KAY, SAM], "kay", "ken");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/owner/i);
+  });
+
+  it("BLOCKS the owner demoting, locking out or deleting THEMSELVES too", () => {
+    // Not a special case for the owner — self-demotion, self-lockout and
+    // self-deletion were already refused for everyone. What matters is that the
+    // owner rule is the one that answers, because it is the one with a way
+    // forward, and because it is the message the database trigger raises.
+    expect(checkRoleChange(OWNED_TEAM, "ken", "ken", "staff").ok).toBe(false);
+    expect(checkActiveChange(OWNED_TEAM, "ken", "ken", false).ok).toBe(false);
+    expect(checkDelete(OWNED_TEAM, "ken", "ken").ok).toBe(false);
+  });
+
+  it("leaves every NON-owner unaffected", () => {
+    expect(checkRoleChange(OWNED_TEAM, "ken", "kay", "staff")).toEqual({ ok: true });
+    expect(checkActiveChange(OWNED_TEAM, "ken", "kay", false)).toEqual({ ok: true });
+    expect(checkRoleChange(OWNED_TEAM, "ken", "sam", "founder")).toEqual({ ok: true });
+  });
+
+  it("never blocks PROMOTING the owner to founder (the repair path)", () => {
+    // The trigger guarantees owner implies founder, so this is a no-op in
+    // practice. It must not be refused, or a corrupted row could never be put
+    // right without disabling the protection.
+    expect(checkRoleChange(OWNED_TEAM, "kay", "ken", "founder")).toEqual({ ok: true });
+    const staffOwner: TeamMemberSnapshot = { ...KEN, role: "staff", is_owner: true };
+    expect(checkRoleChange([staffOwner, KAY], "kay", "ken", "founder")).toEqual({ ok: true });
+  });
+
+  it("never blocks REACTIVATING the owner", () => {
+    const lockedOwner = { ...OWNER, active: false };
+    expect(checkActiveChange([lockedOwner, KAY], "kay", "ken", true)).toEqual({ ok: true });
+  });
+
+  it("changes nothing at all when no owner is set", () => {
+    // Every pre-owner-protection behaviour must survive byte for byte on a
+    // database where this migration has not been applied.
+    expect(checkRoleChange(TWO_FOUNDERS, "kay", "ken", "staff")).toEqual({ ok: true });
+    expect(checkActiveChange(TWO_FOUNDERS, "kay", "ken", false)).toEqual({ ok: true });
+  });
+});
+
+describe("checkOwnershipTransfer", () => {
+  it("ALLOWS the owner handing over to another active founder", () => {
+    expect(checkOwnershipTransfer(OWNED_TEAM, "ken", "kay")).toEqual({ ok: true });
+  });
+
+  it("BLOCKS a founder who is not the owner from moving it", () => {
+    const result = checkOwnershipTransfer(OWNED_TEAM, "kay", "sam");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toMatch(/only ken@veridan\.com/i);
+      expect(result.error).toMatch(/being a founder is not enough/i);
+    }
+  });
+
+  it("BLOCKS a founder trying to take ownership for themselves", () => {
+    // The shape of the attack this rule exists to stop: Kay, a full founder,
+    // naming Kay as the recipient.
+    expect(checkOwnershipTransfer(OWNED_TEAM, "kay", "kay").ok).toBe(false);
+  });
+
+  it("BLOCKS transferring to the owner themselves", () => {
+    const result = checkOwnershipTransfer(OWNED_TEAM, "ken", "ken");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/already owns/i);
+  });
+
+  it("BLOCKS transferring to a staff account, and says to promote first", () => {
+    const result = checkOwnershipTransfer(OWNED_TEAM, "ken", "sam");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/founder first/i);
+  });
+
+  it("BLOCKS transferring to a locked-out founder", () => {
+    const result = checkOwnershipTransfer([OWNER, EX_FOUNDER, SAM], "ken", "ex");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/locked out/i);
+  });
+
+  it("BLOCKS transferring to a removed account", () => {
+    const result = checkOwnershipTransfer([OWNER, REMOVED_FOUNDER, SAM], "ken", "gonef");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/removed/i);
+  });
+
+  it("BLOCKS transferring to someone who is not on the team", () => {
+    expect(checkOwnershipTransfer(OWNED_TEAM, "ken", "ghost").ok).toBe(false);
+  });
+
+  it("refuses, naming the migration, when no owner is set at all", () => {
+    const result = checkOwnershipTransfer(TWO_FOUNDERS, "ken", "kay");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/20260808000001_owner_protection\.sql/);
+  });
+
+  it("requires the typed confirmation word", () => {
+    expect(checkTransferOwnershipConfirmation(TRANSFER_OWNERSHIP_CONFIRMATION_WORD)).toEqual({
+      ok: true,
+    });
+    expect(checkTransferOwnershipConfirmation(" transfer ")).toEqual({ ok: true });
+    expect(checkTransferOwnershipConfirmation("").ok).toBe(false);
+    expect(checkTransferOwnershipConfirmation("TRANSFE").ok).toBe(false);
+    expect(checkTransferOwnershipConfirmation(DELETE_CONFIRMATION_WORD).ok).toBe(false);
+  });
+});
+
+describe("the founder-count invariant still holds around an owner", () => {
+  it("counts the owner as an ordinary founder", () => {
+    expect(countActiveFounders(OWNED_TEAM)).toBe(2);
+    expect(isLastActiveFounder([OWNER, SAM], "ken")).toBe(true);
+  });
+
+  it("still refuses to demote the last active founder when they are NOT the owner", () => {
+    // Owner protection must not accidentally become the only rule left standing:
+    // with a locked-out owner, KAY is the sole ACTIVE founder and the original
+    // last-founder rule must still be the thing that refuses.
+    const sole = checkRoleChange(
+      [{ ...KEN, active: false, is_owner: true }, KAY, SAM],
+      "kay",
+      "kay",
+      "staff"
+    );
+    expect(sole.ok).toBe(false);
+    if (!sole.ok) expect(sole.error).toMatch(/your own role/i);
+
+    const byOther = checkRoleChange(
+      [{ ...KEN, active: false, is_owner: true }, KAY, { ...SAM, role: "founder", active: false }],
+      "sam",
+      "kay",
+      "staff"
+    );
+    expect(byOther.ok).toBe(false);
+    if (!byOther.ok) expect(byOther.error).toMatch(/last active founder/i);
   });
 });

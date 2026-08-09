@@ -22,6 +22,14 @@ export interface TeamUserRow extends UserRow {
   invited_at: string | null;
   deactivated_at: string | null;
   created_at: string;
+  /**
+   * Ownership flag, NOT a role — see 20260808000001_owner_protection.sql. The
+   * owner is a founder in every permission check; the flag only makes their row
+   * un-demotable, un-deactivatable and un-deletable. Deliberately absent from
+   * `UserRow` (and from getCurrentUser()'s select): no access decision anywhere
+   * in this app reads it, and putting it on the session object would invite one.
+   */
+  is_owner: boolean;
 }
 
 export type UserAdminAuditAction =
@@ -30,7 +38,8 @@ export type UserAdminAuditAction =
   | "deactivate"
   | "reactivate"
   | "delete"
-  | "password_reset";
+  | "password_reset"
+  | "ownership_transfer";
 
 export interface UserAdminAuditLogRow {
   id: string;
