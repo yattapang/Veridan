@@ -167,7 +167,7 @@ on conflict (key) do nothing;
 
 insert into public.site_content (key, value, value_type, section_label, description) values
 ('founders',
-  '{"type":"table","value":[{"name":"Ken Yatta","role":"Co-Founder — Operations & Procurement","bio":"Ken brings an engineering background and an MBA to Veridan''s procurement and operations, translating architects'' hardware schedules into precise, landed-cost quotes and managing the multi-origin import process end-to-end."},{"name":"Kaylia","role":"Co-Founder — Sales & Marketing","bio":"Kaylia holds an MBA in sales and marketing and leads Veridan''s client relationships — working with architects, contractors, and building owners from first enquiry through to delivery."}]}'::jsonb,
+  '{"type":"table","value":[{"name":"Ken Yatta","role":"Co-Founder — Operations & Procurement","bio":"Kenyatta brings an engineering background and an MBA to Veridan''s procurement and operations, translating architects'' hardware schedules into precise, landed-cost quotes and managing the multi-origin import process end-to-end."},{"name":"Kaylia","role":"Co-Founder — Sales & Marketing","bio":"Kaylia holds an MBA in sales and marketing and leads Veridan''s client relationships — working with architects, contractors, and building owners from first enquiry through to delivery."}]}'::jsonb,
   'table',
   'About page founder bios',
   'Founder name, role, and bio shown on the About page.')

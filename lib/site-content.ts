@@ -204,7 +204,7 @@ export const founders = [
   {
     name: "Ken Yatta",
     role: "Co-Founder — Operations & Procurement",
-    bio: "Ken brings an engineering background and an MBA to Veridan's procurement and operations, translating architects' hardware schedules into precise, landed-cost quotes and managing the multi-origin import process end-to-end.",
+    bio: "Kenyatta brings an engineering background and an MBA to Veridan's procurement and operations, translating architects' hardware schedules into precise, landed-cost quotes and managing the multi-origin import process end-to-end.",
   },
   {
     name: "Kaylia",
