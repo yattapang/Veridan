@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { ENQUIRY_STATUSES, type EnquiryRow } from "@/lib/supabase/types";
 import { InstructiveMessage } from "@/components/admin/InstructiveMessage";
 import { signEnquiryFileUrls, fileNameFromPath } from "@/lib/storage";
+import { NewEnquiryForm } from "./NewEnquiryForm";
 
 export const metadata = {
   title: "Enquiries",
@@ -103,9 +104,21 @@ export default async function EnquiriesPage({
     <div className="max-w-4xl">
       <h1 className="text-2xl font-semibold text-veridan-ink">Enquiries</h1>
       <p className="mt-2 text-sm text-veridan-warm-gray">
-        Portal submissions (PRD §5.4). Review a submission, then convert it
-        into a company + project to start quoting.
+        Portal submissions (PRD §5.4), plus anything taken by phone, email,
+        or in person. Review an enquiry, then convert it into a company +
+        project, or straight into a quote for a small order.
       </p>
+
+      <section className="mt-8 rounded-md border border-veridan-warm-gray-light bg-white px-5 py-5">
+        <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">
+          New enquiry
+        </h2>
+        <p className="mb-4 text-xs text-veridan-warm-gray">
+          Record an enquiry taken by phone, email, or in person. It goes
+          through the same review pipeline as a website submission.
+        </p>
+        <NewEnquiryForm />
+      </section>
 
       <section className="mt-8">
         <form method="get" className="grid gap-3 rounded-md border border-veridan-warm-gray-light bg-white px-5 py-5 sm:grid-cols-4">
