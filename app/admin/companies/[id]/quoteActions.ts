@@ -15,6 +15,14 @@ import { createLineItemQuote, type ProjectActionResult } from "@/app/admin/proje
  * hands off to the SAME createLineItemQuote pipeline a project page's
  * "Create quote (Line-item mode)" button uses — no duplicated quote-creation
  * logic, just one extra project insert in front of it.
+ *
+ * Narrow addition (Admin: create quotes directly, without a project): an
+ * optional `project_id` field in `formData`. When present, this SKIPS the
+ * lightweight-project creation above and hands off to createLineItemQuote
+ * with that existing project directly — this is what lets the Quotes tab's
+ * "New quote" form (app/admin/quotes/NewQuoteForm.tsx) offer "attach to an
+ * existing project" without a second quote-creation code path. Every other
+ * caller (CompanyQuoteForm, which never sends project_id) is unaffected.
  */
 export async function createRetrofitQuoteForCompany(
   companyId: string,
@@ -38,6 +46,23 @@ export async function createRetrofitQuoteForCompany(
     .maybeSingle();
   if (companyError) return { ok: false, error: `Could not load the company: ${companyError.message}` };
   if (!company) return { ok: false, error: "Company not found." };
+
+  const existingProjectId = String(formData.get("project_id") ?? "").trim();
+  if (existingProjectId) {
+    const { data: existingProject, error: existingProjectError } = await supabase
+      .from("projects")
+      .select("id, company_id")
+      .eq("id", existingProjectId)
+      .maybeSingle();
+    if (existingProjectError) {
+      return { ok: false, error: `Could not load the selected project: ${existingProjectError.message}` };
+    }
+    if (!existingProject) return { ok: false, error: "The selected project no longer exists." };
+    if (existingProject.company_id !== companyId) {
+      return { ok: false, error: "The selected project does not belong to this company." };
+    }
+    return createLineItemQuote(existingProject.id as string);
+  }
 
   const projectNameRaw = String(formData.get("project_name") ?? "").trim();
   const siteAddress = String(formData.get("site_address") ?? "").trim();

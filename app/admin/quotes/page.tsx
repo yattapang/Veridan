@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import type { QuoteWithProject } from "@/lib/supabase/types";
+import type { CompanyRow, QuoteWithProject } from "@/lib/supabase/types";
 import { InstructiveMessage } from "@/components/admin/InstructiveMessage";
 import {
   QUOTE_STATUS_BADGE,
@@ -10,6 +10,7 @@ import {
 } from "@/lib/quotes/format";
 import { isComputedExpired } from "@/lib/quotes/workflow";
 import { requireAdminArea } from "@/lib/roles/guards";
+import { NewQuoteForm, type QuoteProjectOption } from "./NewQuoteForm";
 
 export const metadata = {
   title: "Quotes",
@@ -66,20 +67,48 @@ export default async function QuotesPage() {
     );
   }
 
+  // For the "New quote" form's company picker and its optional (never
+  // required) existing-project attachment — see NewQuoteForm.tsx. Best-effort:
+  // a failure here degrades the form (empty pickers) rather than the page.
+  let companies: CompanyRow[] = [];
+  let projectOptions: QuoteProjectOption[] = [];
+  try {
+    const [{ data: companyRows }, { data: projectRows }] = await Promise.all([
+      supabase.from("companies").select("*").order("name"),
+      supabase.from("projects").select("id, name, company_id").neq("status", "archived").order("name"),
+    ]);
+    companies = (companyRows as CompanyRow[]) ?? [];
+    projectOptions = (projectRows as QuoteProjectOption[]) ?? [];
+  } catch {
+    // Non-fatal — see comment above.
+  }
+
   return (
     <div className="max-w-5xl">
       <h1 className="text-2xl font-semibold text-veridan-ink">Quotes</h1>
       <p className="mt-2 text-sm text-veridan-warm-gray">
-        Every quote across all projects. Create a Door Register quote from a project&apos;s page, or
-        a Line-item quote from a project or company page. Totals are the cached values from the
-        last recompute.
+        Every quote across all projects. Start one directly below for a client with no project yet,
+        or create a Door Register quote from a project&apos;s page for a full new-construction job.
+        Totals are the cached values from the last recompute.
       </p>
 
-      <section className="mt-8">
+      <section className="mt-8 rounded-md border border-veridan-warm-gray-light bg-white px-5 py-5">
+        <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">
+          New quote
+        </h2>
+        <p className="mb-4 text-xs text-veridan-warm-gray">
+          For a small order that isn&apos;t tied to a project: pick or create a company, optionally
+          attach an existing project, and start a Line-item quote. You&apos;ll land in the builder to
+          add lines.
+        </p>
+        <NewQuoteForm companies={companies} projects={projectOptions} />
+      </section>
+
+      <section className="mt-10">
         {quotes.length === 0 ? (
           <InstructiveMessage
             title="No quotes yet"
-            body="For new construction: open a project with doors and hardware sets assigned, then use 'Create quote (Door Register mode)'. For a retrofit/simple job: use 'Create quote (Line-item mode)' from a project or company page."
+            body="Use “New quote” above for a client with no project (optionally attaching an existing one), or open a project with doors and hardware sets assigned and use 'Create quote (Door Register mode)' for a full new-construction job."
           />
         ) : (
           <div className="overflow-x-auto rounded-md border border-veridan-warm-gray-light bg-white">
