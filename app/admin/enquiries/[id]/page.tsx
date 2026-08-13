@@ -6,6 +6,7 @@ import { InstructiveMessage } from "@/components/admin/InstructiveMessage";
 import { signEnquiryFileUrls, fileNameFromPath } from "@/lib/storage";
 import { StatusForm } from "./StatusForm";
 import { ConvertForm } from "./ConvertForm";
+import { ConvertToQuoteForm } from "./ConvertToQuoteForm";
 
 export async function generateMetadata({
   params,
@@ -150,6 +151,21 @@ export default async function EnquiryDetailPage({
   const companies = (companiesData as CompanyRow[]) ?? [];
   const linkedProject = linkedProjectResult?.data ?? null;
 
+  // `quotes` has no `enquiry_id` column (§1.7) — the only schema-supported
+  // link back from a quote to this enquiry is via its project, so when this
+  // enquiry converted straight to a quote (ConvertToQuoteForm), surface that
+  // quote here by looking it up through the linked (possibly lightweight,
+  // auto-named) project instead.
+  let linkedQuotes: Array<{ id: string; quote_ref: string }> = [];
+  if (linkedProject) {
+    const { data: quoteRows } = await supabase
+      .from("quotes")
+      .select("id, quote_ref")
+      .eq("project_id", linkedProject.id)
+      .order("created_at", { ascending: false });
+    linkedQuotes = (quoteRows as Array<{ id: string; quote_ref: string }>) ?? [];
+  }
+
   return (
     <div className="max-w-3xl">
       <Link
@@ -264,6 +280,20 @@ export default async function EnquiryDetailPage({
             >
               View {linkedProject.name} →
             </Link>
+            {linkedQuotes.length > 0 && (
+              <ul className="mt-2 space-y-1">
+                {linkedQuotes.map((q) => (
+                  <li key={q.id}>
+                    <Link
+                      href={`/admin/quotes/${q.id}`}
+                      className="text-sm font-medium text-veridan-accent underline underline-offset-2 hover:text-veridan-accent-soft"
+                    >
+                      View quote {q.quote_ref} →
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         ) : enquiry.status === "converted" ? (
           <InstructiveMessage
@@ -281,6 +311,21 @@ export default async function EnquiryDetailPage({
           </>
         )}
       </section>
+
+      {enquiry.status !== "converted" && (
+        <section className="mt-8 rounded-md border border-veridan-warm-gray-light bg-white px-5 py-5">
+          <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">
+            Or create a quote directly
+          </h2>
+          <p className="mb-4 text-sm text-veridan-warm-gray">
+            For a small order that doesn&apos;t need a full project: pick an
+            existing company or create a new one, and go straight to a quote.
+            The enquiry&apos;s contact details carry across automatically,
+            and this also marks the enquiry converted.
+          </p>
+          <ConvertToQuoteForm enquiry={enquiry} companies={companies} />
+        </section>
+      )}
     </div>
   );
 }
