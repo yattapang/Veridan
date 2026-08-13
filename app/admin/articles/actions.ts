@@ -4,7 +4,7 @@ import { revalidatePath, revalidateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
-import { uploadArticleHeroImage, uploadArticleSourceFile } from "@/lib/storage";
+import { articleHeroImagePublicUrl, uploadArticleHeroImage, uploadArticleSourceFile } from "@/lib/storage";
 import { nextAvailableSlug, slugify } from "@/lib/articles/slug";
 import type { ArticleRow, ArticleStatus } from "@/lib/supabase/types";
 
@@ -221,6 +221,44 @@ export async function saveHeroImage(
   revalidateArticleAdmin(articleId);
   if (existing?.status === "published") revalidatePublicArticle(existing.slug);
   return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Body image upload (inline photos placed within the article body via
+// lib/articles/markdown.ts's `![alt](src "Caption")` syntax). Reuses the
+// SAME public `article-hero-images` bucket/helper as the hero image above —
+// that bucket now holds both hero and inline body images, not just heroes
+// (see uploadArticleHeroImage's header comment in lib/storage.ts). Unlike
+// saveHeroImage, this does NOT touch the article row: it only returns the
+// public URL, and the editor builds/inserts the markdown snippet itself.
+// ---------------------------------------------------------------------------
+
+export type ArticleImageUploadResult =
+  | { ok: true; url: string; error?: undefined }
+  | { ok: false; error: string };
+
+export async function uploadArticleBodyImage(
+  articleId: string,
+  formData: FormData
+): Promise<ArticleImageUploadResult> {
+  const { supabase, error: clientError } = await getSupabaseOrError();
+  if (!supabase) return { ok: false, error: clientError };
+
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "You must be signed in to upload an image." };
+
+  const file = formData.get("body_image");
+  if (!(file instanceof File) || file.size === 0) {
+    return { ok: false, error: "Choose an image file." };
+  }
+
+  const { path, error } = await uploadArticleHeroImage(supabase, articleId, file);
+  if (error || !path) return { ok: false, error: `Could not upload the image: ${error ?? "unknown error"}` };
+
+  const url = articleHeroImagePublicUrl(supabase, path);
+  if (!url) return { ok: false, error: "Image uploaded but its public URL could not be resolved." };
+
+  return { ok: true, url };
 }
 
 // ---------------------------------------------------------------------------

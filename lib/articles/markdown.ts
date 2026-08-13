@@ -11,10 +11,11 @@
  *
  * Deliberately minimal: headings (# .. ######), paragraphs, bold/italic,
  * inline code, fenced code blocks, links (http(s)/mailto/relative only —
- * `javascript:` and other schemes are stripped), blockquotes, and
- * ordered/unordered lists. No tables, no images, no raw HTML passthrough —
- * anything beyond this set renders as plain escaped text, which is a safe
- * degradation, not a bug.
+ * `javascript:` and other schemes are stripped), images with an optional
+ * caption (`![alt](src "Caption")` — src is sanitized even more strictly
+ * than link hrefs, see sanitizeImageSrc), blockquotes, and ordered/unordered
+ * lists. No tables, no raw HTML passthrough — anything beyond this set
+ * renders as plain escaped text, which is a safe degradation, not a bug.
  */
 
 function escapeHtml(text: string): string {
@@ -35,6 +36,59 @@ function sanitizeHref(rawHref: string): string | null {
 }
 
 /**
+ * The host allowed for absolute-URL image sources: the project's own public
+ * Supabase Storage host, derived from NEXT_PUBLIC_SUPABASE_URL (already
+ * exposed to the client bundle for the browser-side Supabase client — see
+ * lib/supabase/client.ts). Written as a literal `process.env.NEXT_PUBLIC_…`
+ * access (not read through an intermediate variable) so Next.js's build-time
+ * inlining can still find and replace it in client bundles. Computed fresh
+ * on every call rather than cached at module scope, so it reflects whatever
+ * environment is active at call time (including under test).
+ */
+function supabaseStorageHost(): string | null {
+  const raw = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!raw) return null;
+  try {
+    return new URL(raw).host || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Sanitizes an `<img>` src — deliberately stricter than sanitizeHref. A link
+ * only fires on a deliberate click and a bad href just fails to navigate; an
+ * `<img>` loads unconditionally the moment the page renders, and `src` is a
+ * richer attack surface (`javascript:`, `data:`, open redirects, host
+ * confusion). So, unlike links, there is no blanket allowance for arbitrary
+ * https/mailto hosts — only:
+ *   - a same-origin relative path (leading `/`, and NOT `//…`, which the
+ *     browser resolves as an absolute URL to an arbitrary host), or
+ *   - an absolute `https://` URL whose host is exactly this project's own
+ *     Supabase Storage host (the public `article-hero-images` bucket).
+ * Everything else — `javascript:`, `data:`, `http:`, other hosts, malformed
+ * URLs — is rejected. Note this function only ever sees text that has
+ * already been through escapeHtml (see renderInline), so a raw `"` or `>`
+ * in the source can never reach here to begin with — it arrives as `&quot;`/
+ * `&gt;`, which fails every branch below and is rejected as an unrecognized
+ * src, not smuggled through as a broken attribute.
+ */
+function sanitizeImageSrc(rawSrc: string): string | null {
+  const src = rawSrc.trim();
+  if (!src) return null;
+  if (src.startsWith("/") && !src.startsWith("//") && !src.includes("\\")) return src;
+  if (!/^https:\/\//i.test(src)) return null;
+  let url: URL;
+  try {
+    url = new URL(src);
+  } catch {
+    return null;
+  }
+  const allowedHost = supabaseStorageHost();
+  return allowedHost && url.host === allowedHost ? src : null;
+}
+
+/**
  * Inline-level formatting within a single line/paragraph, applied to
  * ALREADY-escaped text. Code spans are pulled out into placeholders before
  * any other inline rule runs, and restored last, so a bold/italic/link
@@ -47,6 +101,24 @@ function renderInline(escapedText: string): string {
     codeSpans.push(`<code>${code}</code>`);
     return `@@CODESPAN${codeSpans.length - 1}@@`;
   });
+
+  // Images ![alt](src "Caption") — MUST run before the link rule, otherwise
+  // `![alt](src)` partially matches the link pattern (the `!` is left
+  // dangling in front of a rendered `<a>`). src is sanitized far more
+  // strictly than a link href (see sanitizeImageSrc); an unsafe/unrecognized
+  // src degrades to plain alt text rather than emitting any tag. The
+  // optional title (in already-escaped `&quot;…&quot;`, since this text has
+  // been through escapeHtml) becomes the caption; omitted entirely when no
+  // title is given.
+  out = out.replace(
+    /!\[([^\]]*)\]\(([^)\s]+)(?:\s+&quot;(.*?)&quot;)?\)/g,
+    (_m, alt: string, src: string, caption?: string) => {
+      const safeSrc = sanitizeImageSrc(src);
+      if (!safeSrc) return alt;
+      const img = `<img src="${safeSrc}" alt="${alt}" loading="lazy" />`;
+      return caption ? `<figure>${img}<figcaption>${caption}</figcaption></figure>` : `<figure>${img}</figure>`;
+    }
+  );
 
   // Links [label](href) — href is sanitized; an unsafe scheme degrades to plain label text.
   out = out.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_m, label: string, href: string) => {
@@ -202,6 +274,9 @@ export function markdownToPlainText(markdown: string): string {
     .replace(/^[-*]\s+/gm, "")
     .replace(/^\d+[.)]\s+/gm, "")
     .replace(/`([^`]+)`/g, "$1")
+    // Images — MUST run before the link stripper, otherwise `![alt](src)`
+    // partially matches the link pattern and leaves a stray leading `!`.
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1")
     .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
     .replace(/\*\*([^*]+)\*\*/g, "$1")
     .replace(/__([^_]+)__/g, "$1")

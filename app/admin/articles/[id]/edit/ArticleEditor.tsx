@@ -18,6 +18,7 @@ import {
 } from "../../actions";
 import { createArticleCategoryInline, type CategoryQuickCreateResult } from "../../categories/actions";
 import { AiAssistPanel } from "./AiAssistPanel";
+import { BodyImageUploader } from "./BodyImageUploader";
 import { HeroImageUploader } from "./HeroImageUploader";
 import { LinkedinCopyButton } from "./LinkedinCopyButton";
 
@@ -327,7 +328,7 @@ export function ArticleEditor({
               rows={16}
               value={body}
               onChange={(e) => setBody(e.target.value)}
-              placeholder="Write in Markdown — headings (#), lists (-), **bold**, *italic*, [links](/path)."
+              placeholder='Write in Markdown — headings (#), lists (-), **bold**, *italic*, [links](/path), ![alt](url "Caption") for a body photo (use "Body photos" below to upload and get the snippet).'
               className={`${inputClass} mt-1 font-mono`}
             />
           )}
@@ -397,6 +398,13 @@ export function ArticleEditor({
           Hero image
         </h2>
         <HeroImageUploader articleId={article.id} currentImageUrl={heroImageUrl} />
+      </section>
+
+      <section className="mt-10">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-veridan-warm-gray">
+          Body photos
+        </h2>
+        <BodyImageUploader articleId={article.id} />
       </section>
 
       <section className="mt-10">
