@@ -3,6 +3,7 @@ import Link from "next/link";
 import { getCurrentUser } from "@/lib/auth";
 import { normalizeRole } from "@/lib/roles/matrix";
 import { AdminSidebar } from "@/components/admin/AdminSidebar";
+import { AdminMobileNav } from "@/components/admin/AdminMobileNav";
 import { SignOutButton } from "@/components/admin/SignOutButton";
 
 // Every /admin/* page is authenticated, cookie-dependent content — never
@@ -62,18 +63,21 @@ export default async function AdminLayout({
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between border-b border-veridan-warm-gray-light bg-veridan-paper px-6 py-4">
-          <div className="min-w-0">
-            <Link
-              href="/admin/account"
-              className="truncate text-sm font-medium text-veridan-ink hover:underline hover:underline-offset-2"
-            >
-              {user.display_name || user.email}
-            </Link>
-            <p className="truncate text-xs text-veridan-warm-gray">
-              {role === "founder" ? "Founder" : "Staff"}
-              {user.display_name ? ` · ${user.email}` : ""}
-            </p>
+        <header className="flex items-center justify-between gap-3 border-b border-veridan-warm-gray-light bg-veridan-paper px-4 py-4 md:px-6">
+          <div className="flex min-w-0 items-center gap-1">
+            <AdminMobileNav role={role} />
+            <div className="min-w-0">
+              <Link
+                href="/admin/account"
+                className="truncate text-sm font-medium text-veridan-ink hover:underline hover:underline-offset-2"
+              >
+                {user.display_name || user.email}
+              </Link>
+              <p className="truncate text-xs text-veridan-warm-gray">
+                {role === "founder" ? "Founder" : "Staff"}
+                {user.display_name ? ` · ${user.email}` : ""}
+              </p>
+            </div>
           </div>
           <SignOutButton />
         </header>

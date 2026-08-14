@@ -222,30 +222,32 @@ export default async function CashFlowReportPage({
               {row.entries.length === 0 ? (
                 <p className="mt-1 text-xs text-veridan-warm-gray">No payments recorded.</p>
               ) : (
-                <table className="mt-1 w-full min-w-[520px] table-auto border-collapse text-left text-sm">
-                  <thead>
-                    <tr className="text-[10px] font-semibold uppercase tracking-wide text-veridan-warm-gray">
-                      <th className="py-1 pr-3">Date</th>
-                      <th className="py-1 pr-3">Invoice</th>
-                      <th className="py-1 pr-3">Quote</th>
-                      <th className="py-1 pr-3">Method</th>
-                      <th className="py-1 text-right">Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {row.entries.map((e, i) => (
-                      <tr key={`in-${e.invoiceNumber}-${i}`} className="border-t border-veridan-warm-gray-light">
-                        <td className="py-1.5 pr-3 text-veridan-warm-gray">{e.paidAtIso}</td>
-                        <td className="py-1.5 pr-3 text-veridan-ink">{e.invoiceNumber}</td>
-                        <td className="py-1.5 pr-3 text-veridan-warm-gray">{e.quoteRef}</td>
-                        <td className="py-1.5 pr-3 text-veridan-warm-gray">{e.method ?? "—"}</td>
-                        <td className="py-1.5 text-right font-medium text-veridan-ink">
-                          {formatJmd(e.amountJmd, 2)}
-                        </td>
+                <div className="overflow-x-auto">
+                  <table className="mt-1 w-full min-w-[520px] table-auto border-collapse text-left text-sm">
+                    <thead>
+                      <tr className="text-[10px] font-semibold uppercase tracking-wide text-veridan-warm-gray">
+                        <th className="py-1 pr-3">Date</th>
+                        <th className="py-1 pr-3">Invoice</th>
+                        <th className="py-1 pr-3">Quote</th>
+                        <th className="py-1 pr-3">Method</th>
+                        <th className="py-1 text-right">Amount</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {row.entries.map((e, i) => (
+                        <tr key={`in-${e.invoiceNumber}-${i}`} className="border-t border-veridan-warm-gray-light">
+                          <td className="py-1.5 pr-3 text-veridan-warm-gray">{e.paidAtIso}</td>
+                          <td className="py-1.5 pr-3 text-veridan-ink">{e.invoiceNumber}</td>
+                          <td className="py-1.5 pr-3 text-veridan-warm-gray">{e.quoteRef}</td>
+                          <td className="py-1.5 pr-3 text-veridan-warm-gray">{e.method ?? "—"}</td>
+                          <td className="py-1.5 text-right font-medium text-veridan-ink">
+                            {formatJmd(e.amountJmd, 2)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
 
@@ -254,35 +256,37 @@ export default async function CashFlowReportPage({
               {row.outEntries.length === 0 ? (
                 <p className="mt-1 text-xs text-veridan-warm-gray">No payments made.</p>
               ) : (
-                <table className="mt-1 w-full min-w-[520px] table-auto border-collapse text-left text-sm">
-                  <thead>
-                    <tr className="text-[10px] font-semibold uppercase tracking-wide text-veridan-warm-gray">
-                      <th className="py-1 pr-3">Date</th>
-                      <th className="py-1 pr-3">Category</th>
-                      <th className="py-1 pr-3">Party</th>
-                      <th className="py-1 pr-3">Description</th>
-                      <th className="py-1 text-right">Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {row.outEntries.map((e, i) => (
-                      <tr key={`out-${i}`} className="border-t border-veridan-warm-gray-light">
-                        <td className="py-1.5 pr-3 text-veridan-warm-gray">{e.paidAtIso}</td>
-                        <td className="py-1.5 pr-3 text-veridan-ink">
-                          {e.categoryLabel}
-                          <span className="ml-1 text-[10px] uppercase tracking-wide text-veridan-warm-gray">
-                            {e.kind === "cost_of_sales" ? "COS" : "OPEX"}
-                          </span>
-                        </td>
-                        <td className="py-1.5 pr-3 text-veridan-warm-gray">{e.party ?? "—"}</td>
-                        <td className="py-1.5 pr-3 text-veridan-warm-gray">{e.description ?? "—"}</td>
-                        <td className="py-1.5 text-right font-medium text-veridan-ink">
-                          {formatJmd(e.amountJmd, 2)}
-                        </td>
+                <div className="overflow-x-auto">
+                  <table className="mt-1 w-full min-w-[520px] table-auto border-collapse text-left text-sm">
+                    <thead>
+                      <tr className="text-[10px] font-semibold uppercase tracking-wide text-veridan-warm-gray">
+                        <th className="py-1 pr-3">Date</th>
+                        <th className="py-1 pr-3">Category</th>
+                        <th className="py-1 pr-3">Party</th>
+                        <th className="py-1 pr-3">Description</th>
+                        <th className="py-1 text-right">Amount</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {row.outEntries.map((e, i) => (
+                        <tr key={`out-${i}`} className="border-t border-veridan-warm-gray-light">
+                          <td className="py-1.5 pr-3 text-veridan-warm-gray">{e.paidAtIso}</td>
+                          <td className="py-1.5 pr-3 text-veridan-ink">
+                            {e.categoryLabel}
+                            <span className="ml-1 text-[10px] uppercase tracking-wide text-veridan-warm-gray">
+                              {e.kind === "cost_of_sales" ? "COS" : "OPEX"}
+                            </span>
+                          </td>
+                          <td className="py-1.5 pr-3 text-veridan-warm-gray">{e.party ?? "—"}</td>
+                          <td className="py-1.5 pr-3 text-veridan-warm-gray">{e.description ?? "—"}</td>
+                          <td className="py-1.5 text-right font-medium text-veridan-ink">
+                            {formatJmd(e.amountJmd, 2)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
           </div>
